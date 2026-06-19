@@ -10,4 +10,6 @@ ap.config(essid='drc-esp', password='drc123')
 while not ap.active():
     pass
 
+print("AP ready:", ap.ifconfig())
+
 webrepl.start(password='drc123')
