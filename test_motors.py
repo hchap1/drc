@@ -16,7 +16,7 @@ def full_power():
     m1_ren.value(1)
     m1_len.value(1)
 
-    m1_rpwm.duty(1023)
+    m1_rpwm.duty(100)
     m1_lpwm.duty(0)
 
 stop_all()
