@@ -41,7 +41,7 @@ class Motors:
 
     def setPower(self, left, right):
         self._set_motor(self.m1_rpwm, self.m1_lpwm, self.m1_ren, self.m1_len, left)
-        self._set_motor(self.m2_rpwm, self.m2_lpwm, self.m2_ren, self.m2_len, right)
+        self._set_motor(self.m2_rpwm, self.m2_lpwm, self.m2_ren, self.m2_len,-right)
 
 if __name__ == "__main__":
     from time import sleep
