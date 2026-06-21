@@ -10,7 +10,7 @@ import cv2
 import numpy as np
 
 PORT = 5007
-_HEADER = struct.Struct('<HBB')
+_HEADER = struct.Struct('<HHH')
 HEADER_SIZE = _HEADER.size
 
 
@@ -24,12 +24,17 @@ def main(port=PORT):
     current_frame_id = None
     chunks = {}
     expected_total = 0
+    chunks_received = 0
 
     try:
         while True:
             packet, addr = sock.recvfrom(65535)
             if len(packet) < HEADER_SIZE:
                 continue
+
+            chunks_received += 1
+            if chunks_received % 100 == 1:
+                print('video_client: received %d chunks so far (latest from %s)' % (chunks_received, addr))
 
             frame_id, chunk_index, total_chunks = _HEADER.unpack_from(packet, 0)
             payload = packet[HEADER_SIZE:]
