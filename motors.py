@@ -6,16 +6,16 @@ class Motors:
     def __init__(self):
 
         # Left
-        self.m1_rpwm = PWM(Pin(25), freq=1000)
-        self.m1_lpwm = PWM(Pin(26), freq=1000)
-        self.m1_ren  = Pin(27, Pin.OUT)
-        self.m1_len  = Pin(14, Pin.OUT)
+        self.left_rpwm = PWM(Pin(25), freq=1000)
+        self.left_lpwm = PWM(Pin(26), freq=1100)
+        self.left_ren  = Pin(27, Pin.OUT)
+        self.left_len  = Pin(14, Pin.OUT)
 
         # Right
-        self.m2_rpwm = PWM(Pin(18), freq=1000)
-        self.m2_lpwm = PWM(Pin(19), freq=1000)
-        self.m2_ren  = Pin(21, Pin.OUT)
-        self.m2_len  = Pin(22, Pin.OUT)
+        self.right_rpwm = PWM(Pin(18), freq=1200)
+        self.right_lpwm = PWM(Pin(19), freq=1300)
+        self.right_ren  = Pin(21, Pin.OUT)
+        self.right_len  = Pin(22, Pin.OUT)
 
         self.setPower(0, 0)
 
@@ -40,15 +40,5 @@ class Motors:
             lpwm.duty(0)
 
     def setPower(self, left, right):
-        self._set_motor(self.m1_rpwm, self.m1_lpwm, self.m1_ren, self.m1_len, left)
-        self._set_motor(self.m2_rpwm, self.m2_lpwm, self.m2_ren, self.m2_len,-right)
-
-if __name__ == "__main__":
-    from time import sleep
-    motors = Motors()
-    
-    for i in range(1, 11):
-        motors.setPower(i / 10, i / 10)
-        sleep(0.2)
-
-    motors.setPower(0, 0)
+        self._set_motor(self.left_rpwm, self.left_lpwm, self.left_ren, self.left_len, left)
+        self._set_motor(self.right_rpwm, self.right_lpwm, self.right_ren, self.right_len,-right)
