@@ -34,23 +34,6 @@ def gstreamer_pipeline(sensor_id=0, capture_width=CAPTURE_WIDTH, capture_height=
         % (sensor_id, capture_width, capture_height, framerate, flip_method)
     )
 
-
-def process_frame(frame: np.ndarray):
-    """
-    *** Fill this in with your CV logic. ***
-
-    frame -- raw BGR image straight off the camera (np.ndarray)
-
-    Must return (left, right, output_image):
-        left, right   -- motor powers in [-1.0, 1.0]
-        output_image  -- BGR np.ndarray (e.g. `frame` with overlays drawn
-                          on it) for display / streaming
-    """
-    left, right = 0.0, 0.0
-    output_image = frame
-    return left, right, output_image
-
-
 def main():
     cap = cv2.VideoCapture(gstreamer_pipeline(), cv2.CAP_GSTREAMER)
     if not cap.isOpened():
