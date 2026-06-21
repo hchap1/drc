@@ -34,13 +34,30 @@ def gstreamer_pipeline(sensor_id=0, capture_width=CAPTURE_WIDTH, capture_height=
         % (sensor_id, capture_width, capture_height, framerate, flip_method)
     )
 
+
+def process_frame(frame: np.ndarray):
+    """
+    *** Fill this in with your CV logic. ***
+
+    frame -- raw BGR image straight off the camera (np.ndarray)
+
+    Must return (left, right, output_image):
+        left, right   -- motor powers in [-1.0, 1.0]
+        output_image  -- BGR np.ndarray (e.g. `frame` with overlays drawn
+                          on it) -- this is what gets streamed
+    """
+    left, right = 0.0, 0.0
+    output_image = frame
+    return left, right, output_image
+
+
 def main():
     cap = cv2.VideoCapture(gstreamer_pipeline(), cv2.CAP_GSTREAMER)
     if not cap.isOpened():
         raise RuntimeError('Could not open CSI camera -- check the ribbon cable and pipeline settings')
 
     motors = motor_client.connect(ESP32_IP)
-    video = video_server.broadcast()   # broadcasts to 192.168.4.255:5007 by default
+    video = video_server.serve()       # listens on 0.0.0.0:5007 for TCP clients
 
     try:
         while True:
