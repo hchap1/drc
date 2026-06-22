@@ -96,15 +96,17 @@ def find_closest_blob_pixel(image, hsv_lower, hsv_upper):
 
     return (
         mask,
-        int(xs[idx]),
-        int(ys[idx]),
+        int(camera_x - xs[idx]),
+        int(camera_y - ys[idx]),
     )
 
 def process_frame(frame: np.ndarray):
     left, right = 0.0, 0.0
 
-    hsv_lower = np.array([80, 30, 20])
-    hsv_upper = np.array([150, 255, 255])
+    blue_hsv_lower = np.array([80, 30, 20])
+    blue_hsv_upper = np.array([150, 255, 255])
+    yellow_hsv_lower = np.array([15, 0, 100])
+    yellow_hsv_upper = np.array([50, 100, 255])
 
     image = birds_eye(
         frame,
@@ -114,7 +116,27 @@ def process_frame(frame: np.ndarray):
         (-16, 10),
     )
 
-    output_image, x, y = find_closest_blob_pixel(image, hsv_lower, hsv_upper)
+    blue_mask, blue_x, blue_y = find_closest_blob_pixel(image, blue_hsv_lower, blue_hsv_upper)
 
-    return left, right, output_image
+    yellow_mask, yellow_x, yellow_y = find_closest_blob_pixel(image, yellow_hsv_lower, yellow_hsv_upper)
+
+    mask = cv2.bitwise_or(yellow_mask, blue_mask)
+
+    if not (blue_x == 0 and blue_y == 0 and yellow_x == 0 and yellow_y == 0):
+        y = abs(yellow_x)
+        b = abs(blue_x)
+
+        if b < y:
+            right = 0.2
+            left = -0.1
+
+        else:
+            right = -0.1
+            left = 0.2
+
+    else:
+        right = 0.1
+        left = 0.1
+
+    return left, right, mask
 
