@@ -33,13 +33,12 @@ import numpy as np
 
 
 def birds_eye(
-    frame:            np.ndarray,
-    front_right:      tuple[float, float],
-    front_left:       tuple[float, float],
-    back_right:       tuple[float, float],
-    back_left:        tuple[float, float],
-    pixels_per_unit:  float | None = None,
-    output_size:      tuple[int, int] | None = None,
+    flipped,
+    front_right,
+    front_left,
+    back_right,
+    back_left,
+    pixels_per_unit
 ) -> np.ndarray:
     """
     Return a top-down warped copy of `image`.
@@ -69,7 +68,7 @@ def birds_eye(
     #    == front-left, bottom-right == back-right, etc.).
     # ------------------------------------------------------------------
 
-    w, h = frame.shape[:2]
+    w, h = flipped.shape[:2]
 
     # ------------------------------------------------------------------
     # 2. Source points: the four corners of the flipped image.
@@ -91,6 +90,8 @@ def birds_eye(
     gnd = np.array([front_right, front_left, back_right, back_left],
                    dtype=np.float32)
 
+    output_size = None
+
     min_x, min_y = gnd.min(axis=0)
     max_x, max_y = gnd.max(axis=0)
     span_x = max_x - min_x
@@ -107,7 +108,7 @@ def birds_eye(
         out_w = max(1, int(np.ceil(span_x * sx)))
         out_h = max(1, int(np.ceil(span_y * sy)))
 
-    def _gnd_to_px(pt: tuple[float, float]) -> list[float]:
+    def _gnd_to_px(pt):
         gx, gy = pt
         # x: left→right in output matches +x in ground frame
         px = (gx - min_x) * sx

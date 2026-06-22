@@ -7,10 +7,11 @@ def process_frame(frame: np.ndarray):
 
     image = birds_eye(
         frame,
+        (1, 1),
+        (0, 1),
+        (1, 0),
         (0, 0),
-        (0, 0),
-        (0, 0),
-        (0, 0)
+        400
     )
 
     output_image = frame
