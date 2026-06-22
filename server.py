@@ -41,14 +41,14 @@ class Motors:
             len_pin.value(1)
             rpwm.duty(duty)
             lpwm.duty(0)
-        elif power < 0.05:
+        elif power < -0.05:
             ren.value(1)
             len_pin.value(1)
             rpwm.duty(0)
             lpwm.duty(duty)
         else:
-            ren.value(0)
-            len_pin.value(0)
+            ren.value(1)
+            len_pin.value(1)
             rpwm.duty(0)
             lpwm.duty(0)
 
