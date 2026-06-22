@@ -36,12 +36,12 @@ class Motors:
     def _set_motor(self, rpwm, lpwm, ren, len_pin, power):
         power = max(-1.0, min(1.0, power))
         duty  = int(abs(power) * self.MAX_DUTY)
-        if power > 0:
+        if power > 0.05:
             ren.value(1)
             len_pin.value(1)
             rpwm.duty(duty)
             lpwm.duty(0)
-        elif power < 0:
+        elif power < 0.05:
             ren.value(1)
             len_pin.value(1)
             rpwm.duty(0)
