@@ -63,7 +63,7 @@ def find_closest_blob_pixel(image, hsv_lower, hsv_upper):
     for label in range(1, num_labels):
         area = stats[label, cv2.CC_STAT_AREA]
 
-        if area < 80:
+        if area < 300:
             continue
 
         ys, xs = np.where(labels == label)
@@ -105,8 +105,8 @@ def process_frame(frame: np.ndarray):
 
     blue_hsv_lower = np.array([80, 30, 20])
     blue_hsv_upper = np.array([150, 255, 255])
-    yellow_hsv_lower = np.array([15, 0, 100])
-    yellow_hsv_upper = np.array([50, 100, 255])
+    yellow_hsv_lower = np.array([0, 60, 120])
+    yellow_hsv_upper = np.array([70, 200, 255])
 
     image = birds_eye(
         frame,
@@ -127,12 +127,12 @@ def process_frame(frame: np.ndarray):
         b = abs(blue_x)
 
         if b < y or y == 0:
-            right = 0.2
-            left = -0.1
+            right = 0.3
+            left = -0.2
 
-        elif b == 0:
-            right = -0.1
-            left = 0.2
+        elif y <= b or b == 0:
+            right = -0.2
+            left = 0.3
 
     else:
         right = 0.1
