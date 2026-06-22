@@ -11,13 +11,13 @@ import queue
 import socket
 import struct
 import threading
-
 import pygame
+
+from client import connect
 
 JETSON_IP = '192.168.4.2'
 PORT = 5007
 _HEADER = struct.Struct('<I')
-
 
 def _recv_exact(sock: socket.socket, n: int) -> bytes:
     buf = b''
@@ -55,6 +55,7 @@ def _receiver(sock: socket.socket, frame_queue: queue.Queue) -> None:
 
 
 def main(ip: str = JETSON_IP, port: int = PORT) -> None:
+    c = connect()
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.connect((ip, port))
     sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
@@ -71,8 +72,15 @@ def main(ip: str = JETSON_IP, port: int = PORT) -> None:
     pygame.display.set_caption('Jetson feed')
     clock = pygame.time.Clock()
 
+    left = 0
+    right = 0
+
+    speed = 100
+
     running = True
     while running:
+
+        dt = clock.tick(100)
         # --- Event handling ---
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -80,6 +88,28 @@ def main(ip: str = JETSON_IP, port: int = PORT) -> None:
             elif event.type == pygame.KEYDOWN:
                 if event.key in (pygame.K_q, pygame.K_ESCAPE):
                     running = False
+
+        key = pygame.key.get_pressed()
+        if key[pygame.K_w]:
+            left += speed
+            right += speed
+        if key[pygame.K_d]:
+            left += speed
+            right -= speed
+        if key[pygame.K_a]:
+            left -= speed
+            right += speed
+        if key[pygame.K_s]:
+            left -= speed
+            right -= speed
+
+        if key[pygame.K_SPACE]:
+            speed += dt / 10
+        if key[pygame.K_LSHIFT]:
+            speed -= dt / 10
+
+        if speed < 50: speed = 50
+        if speed > 500: speed = 500
 
         # --- Frame display ---
         try:
@@ -102,8 +132,7 @@ def main(ip: str = JETSON_IP, port: int = PORT) -> None:
         except queue.Empty:
             pass
 
-        # Cap at 120 Hz so we don't burn CPU when frames aren't arriving
-        clock.tick(120)
+        c.send(left, right)
 
     sock.close()
     pygame.quit()

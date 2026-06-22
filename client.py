@@ -39,7 +39,6 @@ def connect(ip: str = '192.168.4.1', port: int = DEFAULT_PORT) -> Client:
 
 
 if __name__ == '__main__':
-    # quick manual test
     import time
 
     c = connect()
