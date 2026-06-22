@@ -92,28 +92,21 @@ def main(ip: str = JETSON_IP, port: int = PORT) -> None:
 
         key = pygame.key.get_pressed()
 
-        changed = False
+        left = 0
+        right = 0
 
         if key[pygame.K_w]:
             left += speed
             right += speed
-            changed = True
         if key[pygame.K_d]:
             left += speed
             right -= speed
-            changed = True
         if key[pygame.K_a]:
             left -= speed
             right += speed
-            changed = True
         if key[pygame.K_s]:
             left -= speed
             right -= speed
-            changed = True
-
-        if not changed:
-            left = 0
-            right = 0
 
         if key[pygame.K_SPACE]:
             speed += dt / 10000
