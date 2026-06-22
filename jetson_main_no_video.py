@@ -7,6 +7,7 @@ import cv2
 import numpy as np
 
 import client as motor_client
+from process_cv import process_frame
 
 ESP32_IP = '192.168.4.1'
 
@@ -46,13 +47,14 @@ def main():
             ok, frame = cap.read()
             if not ok:
                 continue
+            flipped = cv2.flip(frame, -1)
 
-            left, right, output_image = process_frame(frame)
+            left, right, output_image = process_frame(flipped)
 
             # Hardcoded to (0, 0) for now, as requested. Once you trust
             # process_frame()'s output, swap this line for:
             #     motors.send(left, right)
-            motors.send(0.0, 0.0)
+            motors.send(left, right)
 
     finally:
         cap.release()

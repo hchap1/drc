@@ -51,7 +51,7 @@ def main():
                 continue
 
 
-            flipped = cv2.flip(frame, 0)
+            flipped = cv2.flip(frame, -1)
             left, right, output_image = process_frame(flipped)
 
             # Hardcoded to (0, 0) for now, as requested. Once you trust

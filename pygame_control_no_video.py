@@ -44,9 +44,9 @@ def main() -> None:
             right += speed
         if key[pygame.K_d]:
             left += speed * 1.5
-            right = 0
+            right -= speed * 1.5
         if key[pygame.K_a]:
-            left = 0
+            left -= speed * 1.5
             right += speed * 1.5
         if key[pygame.K_s]:
             left -= speed
