@@ -12,7 +12,7 @@ import cv2
 
 PORT = 5007
 JPEG_QUALITY = 70
-STREAM_WIDTH = 640          # frames are downscaled to this width before sending (None = no resize)
+STREAM_WIDTH = 240          # frames are downscaled to this width before sending (None = no resize)
 SEND_TIMEOUT = 0.5          # max time to wait on one client's send before dropping it
 HEARTBEAT_EVERY = 30        # print a liveness line every N frames (0 to disable)
 
