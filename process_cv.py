@@ -1,142 +1,102 @@
 import cv2
 import numpy as np
-from homography import birds_eye
 
-def find_closest_blob_pixel(image, hsv_lower, hsv_upper):
-    """
-    Finds the pixel closest to the camera (bottom-centre of image)
-    belonging to the closest blob matching the HSV threshold.
+# ── Colour ranges (tune with hsv_tune.py) ────────────────────────────────────
+YELLOW_LOW  = np.array([8,   80,  80])
+YELLOW_HIGH = np.array([35, 255, 255])
+BLUE_LOW    = np.array([90,  60,  30])
+BLUE_HIGH   = np.array([130, 255, 255])
 
-    Returns:
-        (x, y) if a blob is found
-        None otherwise
-    """
-    # Threshold
-    # --------------------------------------------------
-    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+# ── Processing constants ──────────────────────────────────────────────────────
+PROC_W     = 320
+PROC_H     = 180
+ROI_TOP    = 0.45   # ignore top 45% of frame; focus on near-ground region
 
-    mask = cv2.inRange(
-        hsv,
-        hsv_lower,
-        hsv_upper,
-    )
+MIN_PIXELS = 150    # minimum mask pixels to accept a colour as "found"
 
-    # --------------------------------------------------
-    # Morphological cleanup
-    # --------------------------------------------------
-    kernel = np.ones((5, 5), np.uint8)
+BASE_SPEED = 0.15
+STEER_GAIN = 0.40
+MAX_SPEED  = 0.20   # hard cap per competition rules
 
-    mask = cv2.morphologyEx(
-        mask,
-        cv2.MORPH_OPEN,
-        kernel,
-        iterations=2,
-    )
+_KERNEL = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
 
-    mask = cv2.morphologyEx(
-        mask,
-        cv2.MORPH_CLOSE,
-        kernel,
-        iterations=2,
-    )
 
-    # --------------------------------------------------
-    # Connected components
-    # --------------------------------------------------
-    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
-        mask,
-        connectivity=8,
-    )
+def _col_centroid(mask):
+    """Column-weighted centroid of a binary mask. Returns None if too sparse."""
+    col   = mask.sum(axis=0).astype(np.float32)
+    total = col.sum()
+    if total < MIN_PIXELS:
+        return None
+    xs = np.arange(len(col), dtype=np.float32)
+    return float(np.dot(xs, col) / total)
 
-    h, w = mask.shape
-
-    camera_x = w / 2
-    camera_y = h
-
-    best_blob = None
-    best_dist_sq = float("inf")
-
-    # --------------------------------------------------
-    # Find closest blob (minimum distance from camera
-    # to any pixel in the blob)
-    # --------------------------------------------------
-    for label in range(1, num_labels):
-        area = stats[label, cv2.CC_STAT_AREA]
-
-        if area < 300:
-            continue
-
-        ys, xs = np.where(labels == label)
-
-        dist_sq = (
-            (xs - camera_x) ** 2 +
-            (ys - camera_y) ** 2
-        )
-
-        closest_pixel_dist_sq = dist_sq.min()
-
-        if closest_pixel_dist_sq < best_dist_sq:
-            best_dist_sq = closest_pixel_dist_sq
-            best_blob = label
-
-    if best_blob is None:
-        return mask, 0, 0
-
-    # --------------------------------------------------
-    # Find closest pixel within selected blob
-    # --------------------------------------------------
-    ys, xs = np.where(labels == best_blob)
-
-    dist_sq = (
-        (xs - camera_x) ** 2 +
-        (ys - camera_y) ** 2
-    )
-
-    idx = np.argmin(dist_sq)
-
-    return (
-        mask,
-        int(camera_x - xs[idx]),
-        int(camera_y - ys[idx]),
-    )
 
 def process_frame(frame: np.ndarray):
-    left, right = 0.0, 0.0
+    """Return (left, right, debug_image). Motor values are clamped to ±MAX_SPEED."""
 
-    blue_hsv_lower = np.array([80, 30, 20])
-    blue_hsv_upper = np.array([150, 255, 255])
-    yellow_hsv_lower = np.array([0, 60, 120])
-    yellow_hsv_upper = np.array([70, 200, 255])
+    # Guard: ensure consistent resolution regardless of capture source
+    if frame.shape[1] != PROC_W or frame.shape[0] != PROC_H:
+        frame = cv2.resize(frame, (PROC_W, PROC_H), interpolation=cv2.INTER_AREA)
 
-    image = birds_eye(
-        frame,
-        (85, 85),
-        (-85, 85),
-        (16, 10),
-        (-16, 10),
-    )
+    # ── ROI: bottom portion only ──────────────────────────────────────────────
+    y0  = int(PROC_H * ROI_TOP)
+    roi = frame[y0:]
 
-    blue_mask, blue_x, blue_y = find_closest_blob_pixel(image, blue_hsv_lower, blue_hsv_upper)
+    # ── Colour detection (single HSV conversion) ──────────────────────────────
+    hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
 
-    yellow_mask, yellow_x, yellow_y = find_closest_blob_pixel(image, yellow_hsv_lower, yellow_hsv_upper)
+    ym = cv2.inRange(hsv, YELLOW_LOW,  YELLOW_HIGH)
+    bm = cv2.inRange(hsv, BLUE_LOW,    BLUE_HIGH)
 
-    mask = cv2.bitwise_or(yellow_mask, blue_mask)
+    ym = cv2.morphologyEx(ym, cv2.MORPH_OPEN,  _KERNEL)
+    ym = cv2.morphologyEx(ym, cv2.MORPH_CLOSE, _KERNEL)
+    bm = cv2.morphologyEx(bm, cv2.MORPH_OPEN,  _KERNEL)
+    bm = cv2.morphologyEx(bm, cv2.MORPH_CLOSE, _KERNEL)
 
-    if not (blue_x == 0 and blue_y == 0 and yellow_x == 0 and yellow_y == 0):
-        y = abs(yellow_x)
-        b = abs(blue_x)
+    yx = _col_centroid(ym)   # x-position of yellow (left) line
+    bx = _col_centroid(bm)   # x-position of blue (right) line
 
-        if b < y or y == 0:
-            right = 0.3
-            left = -0.2
+    cx = PROC_W / 2.0
 
-        elif y <= b or b == 0:
-            right = -0.2
-            left = 0.3
-
+    # ── Steering target ───────────────────────────────────────────────────────
+    if yx is not None and bx is not None:
+        # Drive toward the midpoint between the two boundary lines
+        target = (yx + bx) / 2.0
+    elif yx is not None:
+        # Only left line visible: assume track extends ~30% frame-width to its right
+        target = yx + PROC_W * 0.30
+    elif bx is not None:
+        # Only right line visible: assume track extends ~30% frame-width to its left
+        target = bx - PROC_W * 0.30
     else:
-        right = 0.1
-        left = 0.1
+        # No lines: creep straight until lines reappear
+        speed = BASE_SPEED * 0.5
+        return speed, speed, _debug(frame, y0, ym, bm, None, None, None, speed, speed)
 
-    return left, right, mask
+    # ── Proportional controller ───────────────────────────────────────────────
+    # error > 0: target is right of centre → turn right (left motor > right motor)
+    error = (target - cx) / cx
+    steer = STEER_GAIN * error
+    left  = max(-MAX_SPEED, min(MAX_SPEED, BASE_SPEED + steer))
+    right = max(-MAX_SPEED, min(MAX_SPEED, BASE_SPEED - steer))
 
+    return left, right, _debug(frame, y0, ym, bm, yx, bx, target, left, right)
+
+
+def _debug(frame, y0, ym, bm, yx, bx, target, left, right):
+    out = frame.copy()
+    h   = frame.shape[0]
+
+    out[y0:][ym > 0] = (0, 220, 220)   # yellow line overlay
+    out[y0:][bm > 0] = (200, 80, 0)    # blue line overlay
+
+    if yx is not None:
+        cv2.line(out, (int(yx),     y0), (int(yx),     h), (0, 255, 255), 1)
+    if bx is not None:
+        cv2.line(out, (int(bx),     y0), (int(bx),     h), (255, 80,  0), 1)
+    if target is not None:
+        cv2.line(out, (int(target), y0), (int(target), h), (0, 255,   0), 1)
+
+    cv2.putText(out, f'L:{left:+.2f} R:{right:+.2f}', (4, 14),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
+    return out
