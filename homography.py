@@ -33,7 +33,7 @@ import numpy as np
 
 
 def birds_eye(
-    image:            np.ndarray,
+    frame:            np.ndarray,
     front_right:      tuple[float, float],
     front_left:       tuple[float, float],
     back_right:       tuple[float, float],
@@ -46,7 +46,7 @@ def birds_eye(
 
     Parameters
     ----------
-    image            : BGR (or grayscale) numpy array from the camera.
+    frame            : BGR (or grayscale) numpy array from the camera.
     front_right      : (x, y) ground-plane coordinate visible at the
                        front-right corner of the camera's field of view.
     front_left       : same, front-left corner.
@@ -68,8 +68,8 @@ def birds_eye(
     #    frame (makes the subsequent corner ordering intuitive: top-left
     #    == front-left, bottom-right == back-right, etc.).
     # ------------------------------------------------------------------
-    flipped = cv2.flip(image, 0)
-    h, w = flipped.shape[:2]
+
+    w, h = frame.shape[:2]
 
     # ------------------------------------------------------------------
     # 2. Source points: the four corners of the flipped image.

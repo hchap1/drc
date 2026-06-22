@@ -8,6 +8,8 @@ import numpy as np
 import client as motor_client
 import video_server
 
+from process_cv import process_frame
+
 ESP32_IP = '192.168.4.1'
 
 CAPTURE_WIDTH = 1280
@@ -34,23 +36,6 @@ def gstreamer_pipeline(sensor_id=0, capture_width=CAPTURE_WIDTH, capture_height=
         % (sensor_id, capture_width, capture_height, framerate, flip_method)
     )
 
-
-def process_frame(frame: np.ndarray):
-    """
-    *** Fill this in with your CV logic. ***
-
-    frame -- raw BGR image straight off the camera (np.ndarray)
-
-    Must return (left, right, output_image):
-        left, right   -- motor powers in [-1.0, 1.0]
-        output_image  -- BGR np.ndarray (e.g. `frame` with overlays drawn
-                          on it) -- this is what gets streamed
-    """
-    left, right = 0.0, 0.0
-    output_image = frame
-    return left, right, output_image
-
-
 def main():
     cap = cv2.VideoCapture(gstreamer_pipeline(), cv2.CAP_GSTREAMER)
     if not cap.isOpened():
@@ -65,13 +50,14 @@ def main():
             if not ok:
                 continue
 
-            left, right, output_image = process_frame(frame)
+
+            flipped = cv2.flip(frame, 0)
+            left, right, output_image = process_frame(flipped)
 
             # Hardcoded to (0, 0) for now, as requested. Once you trust
             # process_frame()'s output, swap this line for:
             #     motors.send(left, right)
-            motors.send(0.0, 0.0)
-
+            motors.send(left, right)
             video.send(output_image)
 
     finally:
