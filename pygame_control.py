@@ -71,11 +71,12 @@ def main(ip: str = JETSON_IP, port: int = PORT) -> None:
     screen = pygame.display.set_mode((640, 480), pygame.RESIZABLE)
     pygame.display.set_caption('Jetson feed')
     clock = pygame.time.Clock()
+    font = pygame.font.Font("freesansbold.ttf", 25)
 
     left = 0
     right = 0
 
-    speed = 100
+    speed = 0.1
 
     running = True
     while running:
@@ -90,26 +91,37 @@ def main(ip: str = JETSON_IP, port: int = PORT) -> None:
                     running = False
 
         key = pygame.key.get_pressed()
+
+        changed = False
+
         if key[pygame.K_w]:
             left += speed
             right += speed
+            changed = True
         if key[pygame.K_d]:
             left += speed
             right -= speed
+            changed = True
         if key[pygame.K_a]:
             left -= speed
             right += speed
+            changed = True
         if key[pygame.K_s]:
             left -= speed
             right -= speed
+            changed = True
+
+        if not changed:
+            left = 0
+            right = 0
 
         if key[pygame.K_SPACE]:
-            speed += dt / 10
+            speed += dt / 10000
         if key[pygame.K_LSHIFT]:
-            speed -= dt / 10
+            speed -= dt / 10000
 
-        if speed < 50: speed = 50
-        if speed > 500: speed = 500
+        if speed < 0.05: speed = 0.05
+        if speed > 0.9: speed = 0.9
 
         # --- Frame display ---
         try:
@@ -127,6 +139,10 @@ def main(ip: str = JETSON_IP, port: int = PORT) -> None:
                     screen = pygame.display.set_mode(surf.get_size(), pygame.RESIZABLE)
 
                 screen.blit(surf, (0, 0))
+                screen.blit(
+                    font.render(f"SPEED {speed}", True, (255, 0, 0)),
+                    (10, 10)
+                )
                 pygame.display.flip()
 
         except queue.Empty:
