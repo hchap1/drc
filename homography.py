@@ -1,33 +1,3 @@
-# homography.py
-# Perspective warp to a top-down (bird's-eye) view.
-#
-# Usage:
-#   from homography import birds_eye
-#
-#   warped = birds_eye(
-#       frame,
-#       front_right = ( 0.20, 0.10),   # metres right-of-centre,  metres ahead
-#       front_left  = (-0.20, 0.10),
-#       back_right  = ( 0.35, 0.60),
-#       back_left   = (-0.35, 0.60),
-#       pixels_per_unit = 400,          # 400 px per metre
-#   )
-#
-# Coordinate convention
-# ---------------------
-#   x  →  right (positive = robot's right)
-#   y  ↑  forward (positive = ahead of robot)
-#
-# The four corner arguments define where, on the ground plane, each
-# corner of the camera's field of view falls.  The image is first
-# flipped vertically (so "front/near" is at the top of the frame),
-# then a perspective warp maps those four corners to their correct
-# metric positions in the output image.
-#
-# In the output image:
-#   +x (right)   → right
-#   +y (forward) → upward   (standard overhead-map convention)
-
 import cv2
 import numpy as np
 
@@ -38,128 +8,100 @@ def birds_eye(
     front_left,
     back_right,
     back_left,
-    pixels_per_unit
-) -> np.ndarray:
-    """
-    Return a top-down warped copy of `image`.
+):
+    h, w = flipped.shape[:2]
 
-    Parameters
-    ----------
-    frame            : BGR (or grayscale) numpy array from the camera.
-    front_right      : (x, y) ground-plane coordinate visible at the
-                       front-right corner of the camera's field of view.
-    front_left       : same, front-left corner.
-    back_right       : same, back-right corner  (farthest right).
-    back_left        : same, back-left corner   (farthest left).
-    pixels_per_unit  : output scale.  E.g. 400 means 400 px per ground
-                       unit (metre, cm, …).  If None, the longer ground
-                       axis is scaled to 400 px.
-    output_size      : (width, height) in pixels.  Overrides
-                       pixels_per_unit when supplied.
-
-    Returns
-    -------
-    warped : np.ndarray with the same channel count as `image`.
-    """
-
-    # ------------------------------------------------------------------
-    # 1. Flip vertically so the near/front field is at the TOP of the
-    #    frame (makes the subsequent corner ordering intuitive: top-left
-    #    == front-left, bottom-right == back-right, etc.).
-    # ------------------------------------------------------------------
-
-    w, h = flipped.shape[:2]
-
-    # ------------------------------------------------------------------
-    # 2. Source points: the four corners of the flipped image.
-    #    Order matches the argument order (front-right, front-left,
-    #    back-right, back-left).
-    # ------------------------------------------------------------------
     src = np.float32([
-        [w - 1, 0    ],   # front-right → top-right
-        [0,     0    ],   # front-left  → top-left
-        [w - 1, h - 1],   # back-right  → bottom-right
-        [0,     h - 1],   # back-left   → bottom-left
+        [w - 1, 0],
+        [0, 0],
+        [w - 1, h - 1],
+        [0, h - 1],
     ])
 
-    # ------------------------------------------------------------------
-    # 3. Destination points: ground coordinates → output pixel positions.
-    #    We find the bounding box of the four ground points and scale
-    #    them uniformly so the output is metrically consistent.
-    # ------------------------------------------------------------------
-    gnd = np.array([front_right, front_left, back_right, back_left],
-                   dtype=np.float32)
-
-    output_size = None
+    gnd = np.array(
+        [front_right, front_left, back_right, back_left],
+        dtype=np.float32,
+    )
 
     min_x, min_y = gnd.min(axis=0)
     max_x, max_y = gnd.max(axis=0)
+
     span_x = max_x - min_x
     span_y = max_y - min_y
 
-    if output_size is not None:
-        out_w, out_h = output_size
-        sx = out_w / span_x
-        sy = out_h / span_y
-    else:
-        if pixels_per_unit is None:
-            pixels_per_unit = 400.0 / max(span_x, span_y)
-        sx = sy = float(pixels_per_unit)
-        out_w = max(1, int(np.ceil(span_x * sx)))
-        out_h = max(1, int(np.ceil(span_y * sy)))
+    # Automatically choose a scale that gives reasonable resolution.
+    scale = 1000.0 / max(span_x, span_y)
 
-    def _gnd_to_px(pt):
+    out_w = max(1, int(np.ceil(span_x * scale)))
+    out_h = max(1, int(np.ceil(span_y * scale)))
+
+    def gnd_to_px(pt):
         gx, gy = pt
-        # x: left→right in output matches +x in ground frame
-        px = (gx - min_x) * sx
-        # y: forward (+y) maps to TOP of output image (py = 0)
-        py = (max_y - gy) * sy
+
+        px = (gx - min_x) * scale
+        py = (max_y - gy) * scale
+
         return [px, py]
 
     dst = np.float32([
-        _gnd_to_px(front_right),
-        _gnd_to_px(front_left),
-        _gnd_to_px(back_right),
-        _gnd_to_px(back_left),
+        gnd_to_px(front_right),
+        gnd_to_px(front_left),
+        gnd_to_px(back_right),
+        gnd_to_px(back_left),
     ])
 
-    # ------------------------------------------------------------------
-    # 4. Compute homography and warp.
-    # ------------------------------------------------------------------
     M = cv2.getPerspectiveTransform(src, dst)
-    warped = cv2.warpPerspective(flipped, M, (out_w, out_h),
-                                 flags=cv2.INTER_LINEAR,
-                                 borderMode=cv2.BORDER_CONSTANT,
-                                 borderValue=0)
-    return warped
 
-
-# ---------------------------------------------------------------------------
-# Quick visual test:  python3 homography.py <image_path>
-# ---------------------------------------------------------------------------
-if __name__ == '__main__':
-    import sys
-
-    path = sys.argv[1] if len(sys.argv) > 1 else None
-    if path:
-        img = cv2.imread(path)
-    else:
-        # Synthetic test: a grey rectangle with a red dot at the centre
-        img = np.full((480, 640, 3), 180, dtype=np.uint8)
-        cv2.circle(img, (320, 240), 20, (0, 0, 255), -1)
-
-    # Example calibration: camera sees a 40 cm wide × 50 cm deep patch
-    # starting 10 cm in front of the robot.
-    warped = birds_eye(
-        img,
-        front_right = ( 0.20, 0.10),
-        front_left  = (-0.20, 0.10),
-        back_right  = ( 0.20, 0.60),
-        back_left   = (-0.20, 0.60),
-        pixels_per_unit = 800,
+    warped = cv2.warpPerspective(
+        flipped,
+        M,
+        (out_w, out_h),
+        flags=cv2.INTER_LINEAR,
+        borderMode=cv2.BORDER_CONSTANT,
+        borderValue=0,
     )
 
-    cv2.imshow('original', img)
-    cv2.imshow('birds_eye', warped)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
+    # ------------------------------------------------------------
+    # Find the largest rectangle guaranteed to contain only valid
+    # warped pixels.
+    # ------------------------------------------------------------
+
+    corners = np.float32([
+        [0, 0],
+        [w - 1, 0],
+        [w - 1, h - 1],
+        [0, h - 1],
+    ]).reshape(-1, 1, 2)
+
+    warped_corners = cv2.perspectiveTransform(corners, M).reshape(-1, 2)
+
+    top = max(
+        warped_corners[0, 1],
+        warped_corners[1, 1],
+    )
+
+    bottom = min(
+        warped_corners[2, 1],
+        warped_corners[3, 1],
+    )
+
+    left = max(
+        warped_corners[0, 0],
+        warped_corners[3, 0],
+    )
+
+    right = min(
+        warped_corners[1, 0],
+        warped_corners[2, 0],
+    )
+
+    left = max(0, int(np.ceil(left)))
+    right = min(out_w, int(np.floor(right)))
+
+    top = max(0, int(np.ceil(top)))
+    bottom = min(out_h, int(np.floor(bottom)))
+
+    if right > left and bottom > top:
+        warped = warped[top:bottom, left:right]
+
+    return warped
