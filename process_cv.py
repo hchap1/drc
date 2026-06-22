@@ -126,11 +126,11 @@ def process_frame(frame: np.ndarray):
         y = abs(yellow_x)
         b = abs(blue_x)
 
-        if b < y:
+        if b < y or y == 0:
             right = 0.2
             left = -0.1
 
-        else:
+        elif b == 0:
             right = -0.1
             left = 0.2
 
