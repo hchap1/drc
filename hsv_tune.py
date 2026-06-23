@@ -18,7 +18,7 @@ _HEADER = struct.Struct('<I')
 # Match process_cv.py
 PROC_W  = 160
 PROC_H  = 90
-ROI_TOP = 0.45
+ROI_TOP = 0.15
 
 PANEL_SCALE = 3   # each panel is upscaled by this factor for visibility
 MIN_PIXELS  = 40
