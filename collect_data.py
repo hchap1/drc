@@ -39,10 +39,10 @@ VIDEO_PORT = 5008
 SAVE_W     = 160
 SAVE_H     = 90
 JPEG_Q     = 90       # quality for saved training frames
-BASE_SPEED  = 0.35   # W/S forward speed
-TURN_SPEED  = 0.15   # A/D turning speed (identical to original)
-TURN_MAX    = 0.20   # turning clamp (identical to original)
-MAX_SPEED   = 0.35   # overall motor clamp
+BASE_SPEED  = 0.275  # W/S forward speed
+TURN_SPEED  = 0.15   # A/D turning speed base
+TURN_MAX    = 0.25   # turning clamp (25% more aggressive than original 0.20)
+MAX_SPEED   = 0.275  # overall motor clamp
 
 _HEADER = struct.Struct('<I')
 
