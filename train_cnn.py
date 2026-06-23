@@ -118,11 +118,11 @@ class DrivingCNN(nn.Module):
             nn.Conv2d(48, 64, 3, stride=2, padding=1), nn.BatchNorm2d(64), nn.ReLU(True),  # 12×20
             nn.Conv2d(64, 64, 3, stride=1, padding=1), nn.BatchNorm2d(64), nn.ReLU(True),  # 12×20
         )
-        # pool to fixed size so FC dims are input-resolution-independent
-        self.pool = nn.AdaptiveAvgPool2d((4, 8))   # → 64×4×8 = 2048
+        # pool to fixed size — (4,5) divides evenly into (12,20) so MPS works
+        self.pool = nn.AdaptiveAvgPool2d((4, 5))   # → 64×4×5 = 1280
         self.head = nn.Sequential(
             nn.Flatten(),
-            nn.Linear(2048, 256), nn.ReLU(True), nn.Dropout(0.5),
+            nn.Linear(1280, 256), nn.ReLU(True), nn.Dropout(0.5),
             nn.Linear(256,  64),  nn.ReLU(True),
             nn.Linear(64,   2),   nn.Tanh(),
         )
