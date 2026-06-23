@@ -1,7 +1,9 @@
 # jetson_main_video.py
-# Runs the line-following controller and broadcasts a debug video feed over TCP.
-# Use video_server.py (client side) to view the feed.
+# Runs the line-following controller and broadcasts two video streams:
+#   port 5007 - debug overlay (for viewing)
+#   port 5008 - raw frames   (for hsv_tune.py)
 
+import threading
 import time
 import cv2
 
@@ -18,14 +20,14 @@ FRAMERATE     = 30
 # 2 = 180° rotation (camera mounted upside-down). Use 0 if right-side up.
 FLIP_METHOD   = 2
 
-VIDEO_SKIP = 5   # encode + send debug frame only every Nth control frame
+DEBUG_SKIP = 5   # send debug frame every Nth frame
+RAW_SKIP   = 3   # send raw frame every Nth frame (for hsv_tune.py)
 
 
 def gstreamer_pipeline(sensor_id=0):
     """
-    Captures from CSI sensor, flips in NVMM, then hardware-downscales to
-    PROC_W x PROC_H before handing pixels to the CPU.  All heavy lifting
-    (flip + scale) stays on the Jetson's video engine.
+    Captures from CSI sensor, flips + downscales to PROC_W x PROC_H entirely
+    in NVMM (Jetson video engine) before handing pixels to the CPU.
     """
     return (
         "nvarguscamerasrc sensor-id=%d ! "
@@ -44,15 +46,38 @@ def gstreamer_pipeline(sensor_id=0):
     )
 
 
+# ── Capture thread ────────────────────────────────────────────────────────────
+# Decouples GStreamer from CV processing so we always consume the latest frame
+# without letting cap.read() block the control loop.
+
+_latest_frame = None
+_frame_lock   = threading.Lock()
+_running      = True
+
+
+def _capture_loop(cap):
+    global _latest_frame
+    while _running:
+        ok, frame = cap.read()
+        if ok:
+            with _frame_lock:
+                _latest_frame = frame
+
+
 def main():
+    global _running
+
     cap = cv2.VideoCapture(gstreamer_pipeline(), cv2.CAP_GSTREAMER)
     if not cap.isOpened():
         raise RuntimeError(
             'Could not open CSI camera -- check the ribbon cable and pipeline settings'
         )
 
-    motors = motor_client.connect(ESP32_IP)
-    video  = video_server.serve()
+    threading.Thread(target=_capture_loop, args=(cap,), daemon=True).start()
+
+    motors    = motor_client.connect(ESP32_IP)
+    debug_vid = video_server.serve(port=5007)
+    raw_vid   = video_server.serve(port=5008)   # raw frames for hsv_tune.py
 
     frame_n = 0
     t0      = time.monotonic()
@@ -60,8 +85,10 @@ def main():
 
     try:
         while True:
-            ok, frame = cap.read()
-            if not ok:
+            with _frame_lock:
+                frame = _latest_frame
+
+            if frame is None:
                 continue
 
             left, right, debug = process_frame(frame)
@@ -69,8 +96,10 @@ def main():
 
             frame_n += 1
 
-            if frame_n % VIDEO_SKIP == 0:
-                video.send(debug)
+            if frame_n % DEBUG_SKIP == 0:
+                debug_vid.send(debug)
+            if frame_n % RAW_SKIP == 0:
+                raw_vid.send(frame)
 
             now = time.monotonic()
             if now - t_log >= 5.0:
@@ -79,9 +108,11 @@ def main():
                 t_log = now
 
     finally:
+        _running = False
         cap.release()
         motors.close()
-        video.close()
+        debug_vid.close()
+        raw_vid.close()
 
 
 if __name__ == '__main__':
