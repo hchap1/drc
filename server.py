@@ -47,8 +47,8 @@ class Motors:
             rpwm.duty(0)
             lpwm.duty(duty)
         else:
-            ren.value(1)
-            len_pin.value(1)
+            ren.value(0)
+            len_pin.value(0)
             rpwm.duty(0)
             lpwm.duty(0)
 
