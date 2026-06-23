@@ -10,27 +10,29 @@ BLUE_HIGH   = np.array([130, 255, 255])
 # ── Processing constants ──────────────────────────────────────────────────────
 PROC_W  = 160
 PROC_H  = 90
-ROI_TOP = 0.30   # use bottom 70% of frame — looks further ahead for earlier reaction
+ROI_TOP = 0.30   # use bottom 70% of frame for earlier line detection
 
-MIN_PIXELS = 40  # minimum mask pixels to accept a colour as "found"
+MIN_PIXELS = 40
 
-BASE_SPEED = 0.15
-STEER_GAIN = 0.40
-MAX_SPEED  = 0.20   # hard cap per competition rules
+BASE_SPEED = 0.225   # 50% faster than original 0.15
+MAX_SPEED  = 0.30
 
-# Desired x-position for each line when it is the only one visible.
-# Keeps the line at a fixed lateral position; as the corner straightens
-# the line drifts back to this position and the error naturally goes to
-# zero — the robot straightens without any explicit corner logic.
-YELLOW_TARGET_X = PROC_W * 0.25   # yellow (left boundary) held at left quarter
-BLUE_TARGET_X   = PROC_W * 0.75   # blue (right boundary) held at right quarter
+# Two gains: gentle when both lines visible (on-track / shallow wall approach),
+# aggressive when only one line visible (corner following / exit).
+STEER_GAIN_BOTH = 0.40
+STEER_GAIN_ONE  = 0.75
+
+# Desired x-position of each boundary line when it is the only one visible.
+# Error goes to zero as the line returns to its normal lateral position
+# → robot straightens naturally on corner exit without any state machine.
+YELLOW_TARGET_X = PROC_W * 0.25
+BLUE_TARGET_X   = PROC_W * 0.75
 
 _KERNEL = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-_XS     = np.arange(PROC_W, dtype=np.float32)   # pre-computed column indices
+_XS     = np.arange(PROC_W, dtype=np.float32)
 
 
 def _col_centroid(mask):
-    """Column-weighted centroid of a binary mask. Returns None if too sparse."""
     col   = mask.sum(axis=0).astype(np.float32)
     total = col.sum()
     if total < MIN_PIXELS:
@@ -38,49 +40,52 @@ def _col_centroid(mask):
     return float(np.dot(_XS, col) / total)
 
 
+def _mix(error, gain):
+    """Differential tank drive: outer motor at full speed, inner slows toward
+    zero but never reverses.  Smooth swing near walls; tight pivot in corners."""
+    steer = gain * error
+    left  = min(MAX_SPEED, max(0.0, BASE_SPEED + steer))
+    right = min(MAX_SPEED, max(0.0, BASE_SPEED - steer))
+    return left, right
+
+
 def process_frame(frame: np.ndarray):
-    """Return (left, right, debug_image). Motor values are clamped to ±MAX_SPEED."""
+    """Return (left, right, debug_image). Motor values are clamped to [0, MAX_SPEED]."""
 
     if frame.shape[1] != PROC_W or frame.shape[0] != PROC_H:
         frame = cv2.resize(frame, (PROC_W, PROC_H), interpolation=cv2.INTER_AREA)
 
-    # ── ROI: bottom portion only ──────────────────────────────────────────────
     y0  = int(PROC_H * ROI_TOP)
     roi = frame[y0:]
 
-    # ── Colour detection (single HSV conversion, no MORPH_CLOSE at this res) ─
     hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
 
     ym = cv2.morphologyEx(cv2.inRange(hsv, YELLOW_LOW, YELLOW_HIGH), cv2.MORPH_OPEN, _KERNEL)
     bm = cv2.morphologyEx(cv2.inRange(hsv, BLUE_LOW,   BLUE_HIGH),   cv2.MORPH_OPEN, _KERNEL)
 
-    yx = _col_centroid(ym)   # x-position of yellow (left) line
-    bx = _col_centroid(bm)   # x-position of blue (right) line
+    yx = _col_centroid(ym)
+    bx = _col_centroid(bm)
 
-    # ── Error computation ─────────────────────────────────────────────────────
     cx = PROC_W / 2.0
 
     if yx is not None and bx is not None:
-        # Both lines: drive toward midpoint
+        # Both lines: gentle correction, no reverse — handles shallow wall approaches
         error = (((yx + bx) / 2.0) - cx) / cx
+        left, right = _mix(error, STEER_GAIN_BOTH)
     elif yx is not None:
-        # Only left line: hold it at its desired lateral position.
-        # As the corner exit straightens the line returns to YELLOW_TARGET_X
-        # → error→0 → robot straightens automatically.
+        # Only left line: aggressive tracking to follow corner and exit cleanly
         error = (yx - YELLOW_TARGET_X) / cx
+        left, right = _mix(error, STEER_GAIN_ONE)
     elif bx is not None:
-        # Only right line: same principle.
+        # Only right line: same
         error = (bx - BLUE_TARGET_X) / cx
+        left, right = _mix(error, STEER_GAIN_ONE)
     else:
-        speed = BASE_SPEED * 0.5
-        return speed, speed, _debug(frame, y0, ym, bm, None, None, None, speed, speed)
+        # Blind: creep straight
+        left = right = BASE_SPEED * 0.5
+        error = 0.0
 
-    # ── Proportional controller ───────────────────────────────────────────────
-    steer  = STEER_GAIN * error
-    left   = max(-MAX_SPEED, min(MAX_SPEED, BASE_SPEED + steer))
-    right  = max(-MAX_SPEED, min(MAX_SPEED, BASE_SPEED - steer))
-    target = cx + error * cx   # recover display target from error
-
+    target = cx + error * cx
     return left, right, _debug(frame, y0, ym, bm, yx, bx, target, left, right)
 
 
