@@ -179,10 +179,9 @@ def main():
     if not sessions:
         raise SystemExit(f'No sessions with labels.csv found under {data_root}')
 
-    n_val  = max(1, int(len(sessions) * VAL_FRAC))
-    n_val  = min(n_val, len(sessions) - 1)
-    val_sessions   = sessions[-n_val:]
-    train_sessions = sessions[:-n_val]
+    n_val          = min(max(1, int(len(sessions) * VAL_FRAC)), len(sessions) - 1)
+    val_sessions   = sessions[-n_val:] if n_val > 0 else []
+    train_sessions = sessions[:-n_val] if n_val > 0 else sessions
 
     print(f'\nFound {len(sessions)} sessions  →  {len(train_sessions)} train / {len(val_sessions)} val')
     train_ds = DrivingDataset(train_sessions, augment=True)
@@ -191,13 +190,15 @@ def main():
     if len(train_ds) == 0:
         raise SystemExit('No training samples found — check your data directory')
 
-    # Fall back to a frame-level split if session split produced an empty val set
-    if len(val_ds) == 0:
-        print('Val sessions had no labels — splitting train set 85/15 by frame instead')
+    # Fall back to frame-level split when session split yields too few val samples
+    if len(val_ds) < args.batch:
+        print('Too few val samples from session split — using 85/15 frame-level split instead')
         from torch.utils.data import random_split
-        n_val_frames  = max(1, int(len(train_ds) * 0.15))
-        n_train_frames = len(train_ds) - n_val_frames
-        train_ds, val_ds = random_split(train_ds, [n_train_frames, n_val_frames])
+        all_ds = DrivingDataset(sessions, augment=False)
+        n_val_frames   = max(1, int(len(all_ds) * 0.15))
+        n_train_frames = len(all_ds) - n_val_frames
+        train_ds, val_ds = random_split(all_ds, [n_train_frames, n_val_frames])
+        train_ds.dataset.augment = True
         print(f'  train: {n_train_frames}  val: {n_val_frames}')
 
     pin = torch.cuda.is_available()
