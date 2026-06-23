@@ -186,20 +186,31 @@ def main():
     model.load_state_dict(best_state)
     model.eval().cpu()
 
-    # TorchScript — works anywhere torch is installed
+    out_path = Path(args.out)
+
+    # TorchScript — drop onto Jetson and run directly
     traced = torch.jit.trace(model, torch.zeros(1, 3, IMG_H, IMG_W))
-    traced.save(args.out)
+    traced.save(str(out_path))
 
-    # State dict — needed by convert_trt.py on the Jetson
-    weights_path = Path(args.out).with_name('model_weights.pth')
-    torch.save(best_state, weights_path)
+    # ONNX — for trtexec conversion on Jetson (no extra packages needed)
+    onnx_path = out_path.with_name('model.onnx')
+    torch.onnx.export(
+        model,
+        torch.zeros(1, 3, IMG_H, IMG_W),
+        str(onnx_path),
+        input_names  = ['image'],
+        output_names = ['motors'],
+        opset_version = 11,
+    )
 
-    print(f'\nSaved {args.out}  (TorchScript — for direct inference)')
-    print(f'Saved {weights_path}  (weights — for TensorRT conversion on Jetson)')
+    print(f'\nSaved {out_path}   (TorchScript)')
+    print(f'Saved {onnx_path}  (ONNX — for TensorRT via trtexec)')
     print(f'Best val loss: {best_val:.6f}')
-    print('\nNext steps:')
-    print('  Copy both files to Jetson, then run:  python3 convert_trt.py')
-    print('  Then:                                  python3 jetson_main_cnn.py')
+    print('\nJetson steps:')
+    print('  1. Copy model.pt → run:  python3 jetson_main_cnn.py  (CUDA, ~30fps)')
+    print('  2. Copy model.onnx → run:')
+    print('       trtexec --onnx=model.onnx --saveEngine=model.trt --fp16')
+    print('     (trtexec ships with JetPack — no install needed)')
 
 
 if __name__ == '__main__':

@@ -76,40 +76,14 @@ def _capture_loop(cap):
 def _load_model(args):
     use_trt = False
 
-    if args.no_trt:
-        path = args.model or 'model.pt'
-    elif args.trt:
-        path    = args.model or 'model_trt.pt'
-        use_trt = True
-    else:
-        # auto-detect: prefer TRT
-        if os.path.exists('model_trt.pt'):
-            path    = 'model_trt.pt'
-            use_trt = True
-        elif os.path.exists('model.pt'):
-            path = 'model.pt'
-        else:
-            sys.exit('No model found. Copy model.pt (and optionally model_trt.pt) to this directory.')
+    path = args.model or 'model.pt'
+    if not os.path.exists(path):
+        sys.exit(f'Model not found: {path}')
 
-    if use_trt:
-        try:
-            try:
-                from torch2trt import TRTModule
-            except ImportError:
-                from torch2trt.torch2trt import TRTModule
-            model = TRTModule()
-            model.load_state_dict(torch.load(path))
-            model.cuda()
-            print(f'[model] TensorRT  ← {path}')
-            return model, 'cuda', True
-        except Exception as e:
-            print(f'[model] TensorRT load failed ({e}), falling back to TorchScript')
-            path    = 'model.pt'
-            use_trt = False
-
-    model = torch.jit.load(path, map_location='cpu').eval()
-    print(f'[model] TorchScript  ← {path}  (run convert_trt.py for faster inference)')
-    return model, 'cpu', False
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    model  = torch.jit.load(path, map_location=device).eval()
+    print(f'[model] TorchScript on {device}  ← {path}')
+    return model, device, False
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
