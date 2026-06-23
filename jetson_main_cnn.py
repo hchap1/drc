@@ -92,6 +92,8 @@ def main():
     global _running
 
     ap = argparse.ArgumentParser()
+    ap.add_argument('speed_mult', nargs='?', type=float, default=1.0,
+                    help='motor output multiplier, e.g. 1.05 = 5%% faster (default 1.0)')
     ap.add_argument('--model',  default=None)
     ap.add_argument('--trt',    action='store_true')
     ap.add_argument('--no-trt', action='store_true', dest='no_trt')
@@ -99,6 +101,9 @@ def main():
 
     model, device_str, use_trt = _load_model(args)
     device = torch.device(device_str)
+    speed_mult = args.speed_mult
+    if speed_mult != 1.0:
+        print(f'[speed] multiplier {speed_mult:.3f}x')
 
     # warm-up pass to avoid latency spike on first real frame
     with torch.no_grad():
@@ -148,8 +153,8 @@ def main():
             tensor = preprocess(frame).to(device)
             with torch.no_grad():
                 out = model(tensor)
-            left  = float(out[0, 0])
-            right = float(out[0, 1])
+            left  = float(out[0, 0]) * speed_mult
+            right = float(out[0, 1]) * speed_mult
 
             motors.send(left, right)
             frame_n += 1
