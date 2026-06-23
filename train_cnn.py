@@ -1,17 +1,18 @@
 """
 train_cnn.py — train the imitation-learning CNN on data collected with
-collect_data.py.  Run this on your gaming PC (CUDA GPU strongly recommended).
+collect_data.py.  Run on your gaming PC (CUDA) or Mac M-series (MPS).
 
 Dependencies:
   pip install torch torchvision opencv-python tqdm
 
 Usage:
-  python train_cnn.py               # trains on ./data/  saves model.pt
+  python train_cnn.py               # trains on ./data/,  saves model.pt + model_weights.pth
   python train_cnn.py --data /path  # custom data root
-  python train_cnn.py --epochs 150  # override epoch count
+  python train_cnn.py --epochs 150
 
-Output:
-  model.pt     TorchScript model ready to drop into jetson_main_cnn.py
+Outputs:
+  model.pt           TorchScript — load with torch.jit.load() anywhere
+  model_weights.pth  State dict  — used by convert_trt.py on the Jetson
 """
 
 import argparse
@@ -26,6 +27,8 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
 
+from cnn_model import DrivingCNN, preprocess, IMG_W, IMG_H, MAX_SPEED
+
 try:
     from tqdm import tqdm
 except ImportError:
@@ -34,24 +37,11 @@ except ImportError:
 
 # ── Hyperparameters ───────────────────────────────────────────────────────────
 
-IMG_W      = 160
-IMG_H      = 90
-MAX_SPEED  = 0.20    # motor output is clamped to ±this in the model
-BATCH      = 64
-EPOCHS     = 100
-LR         = 1e-3
-VAL_FRAC   = 0.15    # fraction of sessions used for validation
-WORKERS    = 4       # DataLoader workers (set 0 on Windows if you hit errors)
-
-
-# ── Preprocessing (must match jetson_main_cnn.py exactly) ────────────────────
-
-def preprocess(bgr: np.ndarray) -> torch.Tensor:
-    """BGR numpy (H,W,3) → float tensor (3,H,W) in [-1, 1]."""
-    rgb   = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-    small = cv2.resize(rgb, (IMG_W, IMG_H), interpolation=cv2.INTER_AREA)
-    t     = torch.from_numpy(small).float().permute(2, 0, 1) / 128.0 - 1.0
-    return t
+BATCH    = 64
+EPOCHS   = 100
+LR       = 1e-3
+VAL_FRAC = 0.15
+WORKERS  = 4       # set 0 on Windows if DataLoader hangs
 
 
 # ── Dataset ───────────────────────────────────────────────────────────────────
@@ -59,13 +49,12 @@ def preprocess(bgr: np.ndarray) -> torch.Tensor:
 class DrivingDataset(Dataset):
     def __init__(self, sessions: list, augment: bool = False):
         self.augment = augment
-        self.samples: list = []   # (image_path, left, right)
+        self.samples: list = []
 
         for sess in sessions:
             csv_path = sess / 'labels.csv'
             fdir     = sess / 'frames'
             if not csv_path.exists():
-                print(f'[warn] no labels.csv in {sess}, skipping')
                 continue
             with open(csv_path, newline='') as f:
                 for row in csv.DictReader(f):
@@ -73,7 +62,8 @@ class DrivingDataset(Dataset):
                     if p.exists():
                         self.samples.append((p, float(row['left']), float(row['right'])))
 
-        print(f'  {"train" if augment else "val":5s}: {len(self.samples)} samples from {len(sessions)} sessions')
+        label = 'train' if augment else 'val'
+        print(f'  {label:5s}: {len(self.samples)} samples from {len(sessions)} sessions')
 
     def __len__(self):
         return len(self.samples)
@@ -84,81 +74,45 @@ class DrivingDataset(Dataset):
         if bgr is None:
             bgr = np.zeros((IMG_H, IMG_W, 3), dtype=np.uint8)
 
-        # ── Augmentation ─────────────────────────────────────────────────────
         if self.augment:
-            # horizontal flip → swap left/right motor
-            if random.random() < 0.5:
-                bgr   = bgr[:, ::-1, :].copy()
+            if random.random() < 0.5:             # horizontal flip
+                bgr        = bgr[:, ::-1, :].copy()
                 left, right = right, left
-
-            # brightness jitter
-            factor = random.uniform(0.70, 1.30)
+            factor = random.uniform(0.70, 1.30)   # brightness jitter
             bgr    = np.clip(bgr.astype(np.float32) * factor, 0, 255).astype(np.uint8)
 
-        tensor = preprocess(bgr)
+        tensor = preprocess(bgr).squeeze(0)       # (3, H, W)
         label  = torch.tensor([left, right], dtype=torch.float32)
         return tensor, label
-
-
-# ── Model ─────────────────────────────────────────────────────────────────────
-
-class DrivingCNN(nn.Module):
-    """End-to-end imitation learning network.
-    Input : (batch, 3, 90, 160) — float, range [-1, 1]
-    Output: (batch, 2)          — [left_motor, right_motor] in [-MAX_SPEED, MAX_SPEED]
-    """
-
-    def __init__(self, max_speed: float = MAX_SPEED):
-        super().__init__()
-        self._scale = max_speed
-        self.features = nn.Sequential(
-            # stride-2 conv blocks — each halves spatial dims
-            nn.Conv2d(3,  24, 5, stride=2, padding=2), nn.BatchNorm2d(24), nn.ReLU(True),  # 45×80
-            nn.Conv2d(24, 48, 5, stride=2, padding=2), nn.BatchNorm2d(48), nn.ReLU(True),  # 23×40
-            nn.Conv2d(48, 64, 3, stride=2, padding=1), nn.BatchNorm2d(64), nn.ReLU(True),  # 12×20
-            nn.Conv2d(64, 64, 3, stride=1, padding=1), nn.BatchNorm2d(64), nn.ReLU(True),  # 12×20
-        )
-        # pool to fixed size — (4,5) divides evenly into (12,20) so MPS works
-        self.pool = nn.AdaptiveAvgPool2d((4, 5))   # → 64×4×5 = 1280
-        self.head = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear(1280, 256), nn.ReLU(True), nn.Dropout(0.5),
-            nn.Linear(256,  64),  nn.ReLU(True),
-            nn.Linear(64,   2),   nn.Tanh(),
-        )
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.head(self.pool(self.features(x))) * self._scale
 
 
 # ── Training helpers ──────────────────────────────────────────────────────────
 
 def _epoch(model, loader, criterion, optimiser, device, train: bool):
     model.train(train)
-    total_loss = 0.0
+    total = 0.0
     with torch.set_grad_enabled(train):
         for imgs, labels in loader:
-            imgs   = imgs.to(device)
-            labels = labels.to(device)
-            preds  = model(imgs)
-            loss   = criterion(preds, labels)
+            imgs, labels = imgs.to(device), labels.to(device)
+            preds = model(imgs)
+            loss  = criterion(preds, labels)
             if train:
                 optimiser.zero_grad()
                 loss.backward()
                 optimiser.step()
-            total_loss += loss.item() * len(imgs)
-    return total_loss / len(loader.dataset)
+            total += loss.item() * len(imgs)
+    return total / len(loader.dataset)
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--data',   default='data',   help='root data directory')
-    ap.add_argument('--epochs', type=int, default=EPOCHS)
-    ap.add_argument('--batch',  type=int, default=BATCH)
+    ap.add_argument('--data',   default='data')
+    ap.add_argument('--epochs', type=int,   default=EPOCHS)
+    ap.add_argument('--batch',  type=int,   default=BATCH)
     ap.add_argument('--lr',     type=float, default=LR)
-    ap.add_argument('--out',    default='model.pt', help='output TorchScript path')
+    ap.add_argument('--out',    default='model.pt')
     args = ap.parse_args()
 
     if torch.cuda.is_available():
@@ -169,13 +123,9 @@ def main():
         device = torch.device('cpu')
     print(f'Device: {device}')
 
-    # ── Discover sessions ────────────────────────────────────────────────────
+    # ── Sessions ─────────────────────────────────────────────────────────────
     data_root = Path(args.data)
-    sessions  = sorted(data_root.glob('session_*'))
-    if not sessions:
-        raise SystemExit(f'No session_* directories found under {data_root}')
-
-    sessions = [s for s in sessions if (s / 'labels.csv').exists()]
+    sessions  = sorted(s for s in data_root.glob('session_*') if (s / 'labels.csv').exists())
     if not sessions:
         raise SystemExit(f'No sessions with labels.csv found under {data_root}')
 
@@ -188,18 +138,16 @@ def main():
     val_ds   = DrivingDataset(val_sessions,   augment=False)
 
     if len(train_ds) == 0:
-        raise SystemExit('No training samples found — check your data directory')
+        raise SystemExit('No training samples found')
 
-    # Fall back to frame-level split when session split yields too few val samples
     if len(val_ds) < args.batch:
-        print('Too few val samples from session split — using 85/15 frame-level split instead')
+        print('Too few val samples — falling back to 85/15 frame-level split')
         from torch.utils.data import random_split
-        all_ds = DrivingDataset(sessions, augment=False)
-        n_val_frames   = max(1, int(len(all_ds) * 0.15))
-        n_train_frames = len(all_ds) - n_val_frames
-        train_ds, val_ds = random_split(all_ds, [n_train_frames, n_val_frames])
+        all_ds         = DrivingDataset(sessions, augment=False)
+        n_v            = max(1, int(len(all_ds) * 0.15))
+        train_ds, val_ds = random_split(all_ds, [len(all_ds) - n_v, n_v])
         train_ds.dataset.augment = True
-        print(f'  train: {n_train_frames}  val: {n_val_frames}')
+        print(f'  train: {len(train_ds)}  val: {len(val_ds)}')
 
     pin = torch.cuda.is_available()
     train_loader = DataLoader(train_ds, batch_size=args.batch, shuffle=True,
@@ -207,44 +155,51 @@ def main():
     val_loader   = DataLoader(val_ds,   batch_size=args.batch, shuffle=False,
                               num_workers=WORKERS, pin_memory=pin)
 
-    # ── Model + optimiser ────────────────────────────────────────────────────
+    # ── Model ────────────────────────────────────────────────────────────────
     model     = DrivingCNN(max_speed=MAX_SPEED).to(device)
     criterion = nn.MSELoss()
     optimiser = torch.optim.Adam(model.parameters(), lr=args.lr)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimiser, T_max=args.epochs, eta_min=1e-5)
 
-    total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f'Model: {total_params:,} trainable parameters\n')
+    print(f'Model: {sum(p.numel() for p in model.parameters() if p.requires_grad):,} parameters\n')
 
     best_val   = float('inf')
     best_state = None
     t0         = time.monotonic()
 
     for ep in range(1, args.epochs + 1):
-        tr_loss = _epoch(model, train_loader, criterion, optimiser, device, train=True)
-        va_loss = _epoch(model, val_loader,   criterion, optimiser, device, train=False)
+        tr = _epoch(model, train_loader, criterion, optimiser, device, train=True)
+        va = _epoch(model, val_loader,   criterion, optimiser, device, train=False)
         scheduler.step()
 
         marker = ''
-        if va_loss < best_val:
-            best_val   = va_loss
+        if va < best_val:
+            best_val   = va
             best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
             marker     = '  ← best'
 
         if ep % 5 == 0 or ep == 1:
-            elapsed = time.monotonic() - t0
-            lr_now  = optimiser.param_groups[0]['lr']
-            print(f'ep {ep:4d}/{args.epochs}  train={tr_loss:.6f}  val={va_loss:.6f}'
-                  f'  lr={lr_now:.2e}  {elapsed:.0f}s{marker}')
+            print(f'ep {ep:4d}/{args.epochs}  train={tr:.6f}  val={va:.6f}'
+                  f'  lr={optimiser.param_groups[0]["lr"]:.2e}  {time.monotonic()-t0:.0f}s{marker}')
 
-    # ── Export best model as TorchScript ────────────────────────────────────
+    # ── Export ───────────────────────────────────────────────────────────────
     model.load_state_dict(best_state)
-    model.eval().to('cpu')
-    example = torch.zeros(1, 3, IMG_H, IMG_W)
-    traced  = torch.jit.trace(model, example)
+    model.eval().cpu()
+
+    # TorchScript — works anywhere torch is installed
+    traced = torch.jit.trace(model, torch.zeros(1, 3, IMG_H, IMG_W))
     traced.save(args.out)
-    print(f'\nSaved TorchScript model → {args.out}  (best val loss: {best_val:.6f})')
-    print('Drop model.pt onto the Jetson and run:  python3 jetson_main_cnn.py')
+
+    # State dict — needed by convert_trt.py on the Jetson
+    weights_path = Path(args.out).with_name('model_weights.pth')
+    torch.save(best_state, weights_path)
+
+    print(f'\nSaved {args.out}  (TorchScript — for direct inference)')
+    print(f'Saved {weights_path}  (weights — for TensorRT conversion on Jetson)')
+    print(f'Best val loss: {best_val:.6f}')
+    print('\nNext steps:')
+    print('  Copy both files to Jetson, then run:  python3 convert_trt.py')
+    print('  Then:                                  python3 jetson_main_cnn.py')
 
 
 if __name__ == '__main__':

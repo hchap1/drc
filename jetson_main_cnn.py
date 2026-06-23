@@ -1,15 +1,23 @@
 """
 jetson_main_cnn.py — autonomous driving via the trained CNN.
-Drop model.pt (output of train_cnn.py) into the same directory, then run:
 
-  python3 jetson_main_cnn.py
-  python3 jetson_main_cnn.py --model /path/to/model.pt
+Automatically uses TensorRT if model_trt.pt exists, otherwise falls back
+to the plain TorchScript model.pt.  Debug feed on port 5007 shows the
+frame at exactly 160×90 — the resolution the CNN was trained on.
 
-Streams a debug view (motor values overlaid) on port 5007 so you can
-watch from a laptop using  python3 view_camera_feed.py.
+Workflow:
+  1. python3 convert_trt.py          # one-time conversion (needs torch2trt)
+  2. python3 jetson_main_cnn.py      # drives autonomously
+  3. python3 view_camera_feed.py     # watch from laptop (port 5007)
+
+Args:
+  --model    override model file (default: auto-detect model_trt.pt → model.pt)
+  --trt      force TensorRT even if auto-detect would pick otherwise
+  --no-trt   force plain TorchScript
 """
 
 import argparse
+import os
 import sys
 import threading
 import time
@@ -20,37 +28,25 @@ import torch
 
 import client as motor_client
 import video_server
-from process_cv import PROC_W, PROC_H
+from cnn_model import DrivingCNN, preprocess, IMG_W, IMG_H
 
-ESP32_IP  = '192.168.4.1'
-IMG_W     = 160
-IMG_H     = 90
-DEBUG_SKIP = 3
+ESP32_IP   = '192.168.4.1'
+DEBUG_SKIP = 2    # stream every Nth frame on port 5007
 
 SENSOR_W    = 1280
 SENSOR_H    = 720
 FRAMERATE   = 30
-FLIP_METHOD = 2
+FLIP_METHOD = 2   # 180° — camera is upside-down
 
 
-# ── Preprocessing — MUST match train_cnn.py exactly ──────────────────────────
-
-def preprocess(bgr: np.ndarray) -> torch.Tensor:
-    """BGR numpy (H,W,3) → float tensor (1,3,H,W) in [-1, 1]."""
-    rgb   = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-    small = cv2.resize(rgb, (IMG_W, IMG_H), interpolation=cv2.INTER_AREA)
-    t     = torch.from_numpy(small).float().permute(2, 0, 1) / 128.0 - 1.0
-    return t.unsqueeze(0)   # add batch dim
-
-
-# ── GStreamer pipeline ────────────────────────────────────────────────────────
+# ── GStreamer pipeline — capture directly at CNN input resolution ──────────────
 
 def _pipeline():
     return (
         f"nvarguscamerasrc sensor-id=0 ! "
         f"video/x-raw(memory:NVMM), width={SENSOR_W}, height={SENSOR_H}, framerate={FRAMERATE}/1 ! "
         f"nvvidconv flip-method={FLIP_METHOD} ! "
-        f"video/x-raw(memory:NVMM), width={PROC_W}, height={PROC_H} ! "
+        f"video/x-raw(memory:NVMM), width={IMG_W}, height={IMG_H} ! "
         f"nvvidconv ! "
         f"video/x-raw, format=BGRx ! "
         f"videoconvert ! "
@@ -75,26 +71,63 @@ def _capture_loop(cap):
                 _latest_frame = frame
 
 
+# ── Model loading ─────────────────────────────────────────────────────────────
+
+def _load_model(args):
+    use_trt = False
+
+    if args.no_trt:
+        path = args.model or 'model.pt'
+    elif args.trt:
+        path    = args.model or 'model_trt.pt'
+        use_trt = True
+    else:
+        # auto-detect: prefer TRT
+        if os.path.exists('model_trt.pt'):
+            path    = 'model_trt.pt'
+            use_trt = True
+        elif os.path.exists('model.pt'):
+            path = 'model.pt'
+        else:
+            sys.exit('No model found. Copy model.pt (and optionally model_trt.pt) to this directory.')
+
+    if use_trt:
+        try:
+            from torch2trt import TRTModule
+            model = TRTModule()
+            model.load_state_dict(torch.load(path))
+            model.cuda()
+            print(f'[model] TensorRT  ← {path}')
+            return model, 'cuda', True
+        except Exception as e:
+            print(f'[model] TensorRT load failed ({e}), falling back to TorchScript')
+            path    = 'model.pt'
+            use_trt = False
+
+    model = torch.jit.load(path, map_location='cpu').eval()
+    print(f'[model] TorchScript  ← {path}  (run convert_trt.py for faster inference)')
+    return model, 'cpu', False
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
     global _running
 
     ap = argparse.ArgumentParser()
-    ap.add_argument('--model', default='model.pt', help='TorchScript model file')
+    ap.add_argument('--model',  default=None)
+    ap.add_argument('--trt',    action='store_true')
+    ap.add_argument('--no-trt', action='store_true', dest='no_trt')
     args = ap.parse_args()
 
-    # Load model
-    try:
-        model = torch.jit.load(args.model, map_location='cpu')
-    except FileNotFoundError:
-        sys.exit(f'Model not found: {args.model}\nTrain with:  python train_cnn.py')
-    model.eval()
-    print(f'Loaded model: {args.model}')
+    model, device_str, use_trt = _load_model(args)
+    device = torch.device(device_str)
 
-    # Warm up inference (avoids first-frame latency spike)
+    # warm-up pass to avoid latency spike on first real frame
     with torch.no_grad():
-        model(torch.zeros(1, 3, IMG_H, IMG_W))
+        dummy = torch.zeros(1, 3, IMG_H, IMG_W).to(device)
+        model(dummy)
+    print('[model] warm-up done')
 
     cap = cv2.VideoCapture(_pipeline(), cv2.CAP_GSTREAMER)
     if not cap.isOpened():
@@ -103,7 +136,9 @@ def main():
     threading.Thread(target=_capture_loop, args=(cap,), daemon=True).start()
 
     motors    = motor_client.connect(ESP32_IP)
-    debug_vid = video_server.serve(port=5007)
+    # stream_width=None → send at native 160×90 so viewer sees exactly what the CNN sees
+    debug_vid = video_server.serve(port=5007, jpeg_quality=80, stream_width=None)
+    print(f'Debug feed on port 5007  ({IMG_W}×{IMG_H})')
 
     frame_n = 0
     left    = 0.0
@@ -119,29 +154,26 @@ def main():
             if frame is None:
                 continue
 
-            # ── CNN inference ─────────────────────────────────────────────────
-            tensor = preprocess(frame)
+            # Inference — frame is already IMG_W×IMG_H from GStreamer
+            tensor = preprocess(frame).to(device)
             with torch.no_grad():
-                out   = model(tensor)
+                out = model(tensor)
             left  = float(out[0, 0])
             right = float(out[0, 1])
 
             motors.send(left, right)
             frame_n += 1
 
-            # ── Debug video ───────────────────────────────────────────────────
             if frame_n % DEBUG_SKIP == 0:
                 dbg = frame.copy()
-                cv2.putText(
-                    dbg, f'CNN  L:{left:+.3f}  R:{right:+.3f}',
-                    (4, 16), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1
-                )
+                mode = 'TRT' if use_trt else 'PT'
+                cv2.putText(dbg, f'{mode}  L:{left:+.3f}  R:{right:+.3f}',
+                            (4, 14), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
                 debug_vid.send(dbg)
 
             now = time.monotonic()
             if now - t_log >= 5.0:
-                fps = frame_n / (now - t0)
-                print(f'fps={fps:.1f}  L={left:+.3f}  R={right:+.3f}')
+                print(f'fps={frame_n/(now-t0):.1f}  L={left:+.3f}  R={right:+.3f}')
                 t_log = now
 
     finally:
