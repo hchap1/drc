@@ -39,8 +39,8 @@ VIDEO_PORT = 5008
 SAVE_W     = 160
 SAVE_H     = 90
 JPEG_Q     = 90       # quality for saved training frames
-BASE_SPEED = 0.15
-MAX_SPEED  = 0.20
+BASE_SPEED = 0.35
+MAX_SPEED  = 0.35
 
 _HEADER = struct.Struct('<I')
 
