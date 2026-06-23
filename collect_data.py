@@ -39,10 +39,8 @@ VIDEO_PORT = 5008
 SAVE_W     = 160
 SAVE_H     = 90
 JPEG_Q     = 90       # quality for saved training frames
-BASE_SPEED  = 0.275  # W/S forward speed
-TURN_SPEED  = 0.15   # A/D turning speed base
-TURN_MAX    = 0.25   # turning clamp (25% more aggressive than original 0.20)
-MAX_SPEED   = 0.275  # overall motor clamp
+BASE_SPEED = 0.15
+MAX_SPEED  = 0.20
 
 _HEADER = struct.Struct('<I')
 
@@ -148,25 +146,20 @@ def main():
                         tag = 'ON ' if recording else 'OFF'
                         print(f'[rec] {tag} — {frame_idx} frames saved')
 
-            keys = pygame.key.get_pressed()
+            keys  = pygame.key.get_pressed()
+            left  = right = 0.0
 
-            # Forward/back — uses variable speed up to 0.35
-            fwd = 0.0
-            if keys[pygame.K_w]: fwd =  speed
-            if keys[pygame.K_s]: fwd = -speed
-
-            # Turning — always fixed at original values regardless of speed
-            turn = 0.0
-            if keys[pygame.K_a]: turn = -TURN_SPEED * 2.5
-            if keys[pygame.K_d]: turn =  TURN_SPEED * 2.5
-            turn = max(-TURN_MAX, min(TURN_MAX, turn))
+            if keys[pygame.K_w]: left  += speed;       right += speed
+            if keys[pygame.K_s]: left  -= speed;       right -= speed
+            if keys[pygame.K_a]: left  -= speed * 2.5; right += speed * 2.5
+            if keys[pygame.K_d]: left  += speed * 2.5; right -= speed * 2.5
 
             if keys[pygame.K_SPACE]:  speed += dt / 10000
             if keys[pygame.K_LSHIFT]: speed -= dt / 10000
             speed = max(0.05, min(MAX_SPEED, speed))
 
-            left  = max(-MAX_SPEED, min(MAX_SPEED, fwd + turn))
-            right = max(-MAX_SPEED, min(MAX_SPEED, fwd - turn))
+            left  = max(-MAX_SPEED, min(MAX_SPEED, left))
+            right = max(-MAX_SPEED, min(MAX_SPEED, right))
             motors.send(left, right)
 
             # pull latest frame
