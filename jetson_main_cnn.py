@@ -93,7 +93,10 @@ def _load_model(args):
 
     if use_trt:
         try:
-            from torch2trt import TRTModule
+            try:
+                from torch2trt import TRTModule
+            except ImportError:
+                from torch2trt.torch2trt import TRTModule
             model = TRTModule()
             model.load_state_dict(torch.load(path))
             model.cuda()

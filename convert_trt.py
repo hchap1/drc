@@ -16,7 +16,10 @@ Then run:
 
 import argparse
 import torch
-from torch2trt import torch2trt, TRTModule
+try:
+    from torch2trt import torch2trt, TRTModule
+except ImportError:
+    from torch2trt.torch2trt import torch2trt, TRTModule
 
 from cnn_model import DrivingCNN, IMG_W, IMG_H
 
