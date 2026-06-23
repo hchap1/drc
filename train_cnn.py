@@ -182,10 +182,20 @@ def main():
     if len(train_ds) == 0:
         raise SystemExit('No training samples found — check your data directory')
 
+    # Fall back to a frame-level split if session split produced an empty val set
+    if len(val_ds) == 0:
+        print('Val sessions had no labels — splitting train set 85/15 by frame instead')
+        from torch.utils.data import random_split
+        n_val_frames  = max(1, int(len(train_ds) * 0.15))
+        n_train_frames = len(train_ds) - n_val_frames
+        train_ds, val_ds = random_split(train_ds, [n_train_frames, n_val_frames])
+        print(f'  train: {n_train_frames}  val: {n_val_frames}')
+
+    pin = torch.cuda.is_available()
     train_loader = DataLoader(train_ds, batch_size=args.batch, shuffle=True,
-                              num_workers=WORKERS, pin_memory=True, drop_last=True)
+                              num_workers=WORKERS, pin_memory=pin, drop_last=True)
     val_loader   = DataLoader(val_ds,   batch_size=args.batch, shuffle=False,
-                              num_workers=WORKERS, pin_memory=True)
+                              num_workers=WORKERS, pin_memory=pin)
 
     # ── Model + optimiser ────────────────────────────────────────────────────
     model     = DrivingCNN(max_speed=MAX_SPEED).to(device)
