@@ -8,17 +8,22 @@ BLUE_LOW    = np.array([90,  60,  30])
 BLUE_HIGH   = np.array([130, 255, 255])
 
 # ── Processing constants ──────────────────────────────────────────────────────
-PROC_W     = 160
-PROC_H     = 90
-ROI_TOP    = 0.45   # ignore top 45% of frame; focus on near-ground region
+PROC_W  = 160
+PROC_H  = 90
+ROI_TOP = 0.30   # use bottom 70% of frame — looks further ahead for earlier reaction
 
-MIN_PIXELS = 40     # minimum mask pixels to accept a colour as "found"
+MIN_PIXELS = 40  # minimum mask pixels to accept a colour as "found"
 
 BASE_SPEED = 0.15
 STEER_GAIN = 0.40
 MAX_SPEED  = 0.20   # hard cap per competition rules
 
-CORNER_OFFSET = 0.30
+# Desired x-position for each line when it is the only one visible.
+# Keeps the line at a fixed lateral position; as the corner straightens
+# the line drifts back to this position and the error naturally goes to
+# zero — the robot straightens without any explicit corner logic.
+YELLOW_TARGET_X = PROC_W * 0.25   # yellow (left boundary) held at left quarter
+BLUE_TARGET_X   = PROC_W * 0.75   # blue (right boundary) held at right quarter
 
 _KERNEL = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
 _XS     = np.arange(PROC_W, dtype=np.float32)   # pre-computed column indices
@@ -52,24 +57,29 @@ def process_frame(frame: np.ndarray):
     yx = _col_centroid(ym)   # x-position of yellow (left) line
     bx = _col_centroid(bm)   # x-position of blue (right) line
 
+    # ── Error computation ─────────────────────────────────────────────────────
     cx = PROC_W / 2.0
 
-    # ── Steering target ───────────────────────────────────────────────────────
     if yx is not None and bx is not None:
-        target = (yx + bx) / 2.0
+        # Both lines: drive toward midpoint
+        error = (((yx + bx) / 2.0) - cx) / cx
     elif yx is not None:
-        target = yx + PROC_W * CORNER_OFFSET
+        # Only left line: hold it at its desired lateral position.
+        # As the corner exit straightens the line returns to YELLOW_TARGET_X
+        # → error→0 → robot straightens automatically.
+        error = (yx - YELLOW_TARGET_X) / cx
     elif bx is not None:
-        target = bx - PROC_W * CORNER_OFFSET
+        # Only right line: same principle.
+        error = (bx - BLUE_TARGET_X) / cx
     else:
         speed = BASE_SPEED * 0.5
         return speed, speed, _debug(frame, y0, ym, bm, None, None, None, speed, speed)
 
     # ── Proportional controller ───────────────────────────────────────────────
-    error = (target - cx) / cx
-    steer = STEER_GAIN * error
-    left  = max(-MAX_SPEED, min(MAX_SPEED, BASE_SPEED + steer))
-    right = max(-MAX_SPEED, min(MAX_SPEED, BASE_SPEED - steer))
+    steer  = STEER_GAIN * error
+    left   = max(-MAX_SPEED, min(MAX_SPEED, BASE_SPEED + steer))
+    right  = max(-MAX_SPEED, min(MAX_SPEED, BASE_SPEED - steer))
+    target = cx + error * cx   # recover display target from error
 
     return left, right, _debug(frame, y0, ym, bm, yx, bx, target, left, right)
 
