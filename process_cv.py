@@ -14,10 +14,9 @@ ROI_TOP    = 0.45   # ignore top 45% of frame; focus on near-ground region
 
 MIN_PIXELS = 150    # minimum mask pixels to accept a colour as "found"
 
-BASE_SPEED    = 0.15
-STEER_GAIN    = 0.40
-MAX_SPEED     = 0.20   # hard cap per competition rules
-CORNER_OFFSET = 0.30   # fraction of frame width to offset target when one line lost
+BASE_SPEED = 0.15
+STEER_GAIN = 0.40
+MAX_SPEED  = 0.20   # hard cap per competition rules
 
 _KERNEL = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
 
@@ -61,15 +60,18 @@ def process_frame(frame: np.ndarray):
 
     # ── Steering target ───────────────────────────────────────────────────────
     if yx is not None and bx is not None:
+        # Drive toward the midpoint between the two boundary lines
         target = (yx + bx) / 2.0
     elif yx is not None:
-        target = yx + PROC_W * CORNER_OFFSET
+        # Only left line visible: assume track extends ~30% frame-width to its right
+        target = yx + PROC_W * 0.30
     elif bx is not None:
-        target = bx - PROC_W * CORNER_OFFSET
+        # Only right line visible: assume track extends ~30% frame-width to its left
+        target = bx - PROC_W * 0.30
     else:
-        # No lines visible: go straight so the robot doesn't overshoot the exit
+        # No lines: creep straight until lines reappear
         speed = BASE_SPEED * 0.5
-        return speed, speed, _debug(frame, y0, ym, bm, None, None, None, speed, speed, 0)
+        return speed, speed, _debug(frame, y0, ym, bm, None, None, None, speed, speed)
 
     # ── Proportional controller ───────────────────────────────────────────────
     # error > 0: target is right of centre → turn right (left motor > right motor)
@@ -78,11 +80,10 @@ def process_frame(frame: np.ndarray):
     left  = max(-MAX_SPEED, min(MAX_SPEED, BASE_SPEED + steer))
     right = max(-MAX_SPEED, min(MAX_SPEED, BASE_SPEED - steer))
 
-    n_lines = (yx is not None) + (bx is not None)
-    return left, right, _debug(frame, y0, ym, bm, yx, bx, target, left, right, n_lines)
+    return left, right, _debug(frame, y0, ym, bm, yx, bx, target, left, right)
 
 
-def _debug(frame, y0, ym, bm, yx, bx, target, left, right, n_lines=2):
+def _debug(frame, y0, ym, bm, yx, bx, target, left, right):
     out = frame.copy()
     h   = frame.shape[0]
 
@@ -96,7 +97,6 @@ def _debug(frame, y0, ym, bm, yx, bx, target, left, right, n_lines=2):
     if target is not None:
         cv2.line(out, (int(target), y0), (int(target), h), (0, 255,   0), 1)
 
-    mode = ['BLIND', 'CORNER', 'TRACK'][n_lines]
-    cv2.putText(out, f'{mode} L:{left:+.2f} R:{right:+.2f}', (4, 14),
+    cv2.putText(out, f'L:{left:+.2f} R:{right:+.2f}', (4, 14),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
     return out
