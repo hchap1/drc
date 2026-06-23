@@ -175,6 +175,10 @@ def main():
     if not sessions:
         raise SystemExit(f'No session_* directories found under {data_root}')
 
+    sessions = [s for s in sessions if (s / 'labels.csv').exists()]
+    if not sessions:
+        raise SystemExit(f'No sessions with labels.csv found under {data_root}')
+
     n_val  = max(1, int(len(sessions) * VAL_FRAC))
     n_val  = min(n_val, len(sessions) - 1)
     val_sessions   = sessions[-n_val:]
