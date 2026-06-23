@@ -21,7 +21,7 @@ FRAMERATE     = 30
 FLIP_METHOD   = 2
 
 DEBUG_SKIP = 5   # send debug frame every Nth frame
-RAW_SKIP   = 3   # send raw frame every Nth frame (for hsv_tune.py)
+RAW_SKIP   = 1   # send raw frame every Nth frame (1=every frame for collect_data.py)
 
 
 def gstreamer_pipeline(sensor_id=0):
@@ -77,7 +77,7 @@ def main():
 
     motors    = motor_client.connect(ESP32_IP)
     debug_vid = video_server.serve(port=5007)
-    raw_vid   = video_server.serve(port=5008)   # raw frames for hsv_tune.py
+    raw_vid   = video_server.serve(port=5008, stream_width=None)   # full-res for collect_data.py
 
     frame_n = 0
     t0      = time.monotonic()
