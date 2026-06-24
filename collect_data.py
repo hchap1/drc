@@ -24,12 +24,12 @@ import pygame
 
 JETSON_IP    = '192.168.4.2'
 LABEL_PORT   = 5009
-SPEED        = 0.28       # starting speed (SPACE/LSHIFT adjust)
-CORNER_SPEED = 0.24       # forward power is capped to this when turning
-STEER_OUTER  = 1.7        # outside wheel boost during turn
-STEER_INNER  = -1.5       # inside wheel — negative overrides W so it reverses even mid-drive
-RAMP_UP      = 0.25       # seconds: 0 → full (press)
-RAMP_DOWN    = 0.1        # seconds: full → 0 (release) — slight linger for tap corrections
+SPEED        = 0.24       # starting speed (SPACE/LSHIFT adjust)
+CORNER_SPEED = 0.20       # forward power is capped to this when turning
+STEER_OUTER  = 1.3        # outside wheel boost during turn
+STEER_INNER  = -1.2       # inside wheel — negative overrides W so it reverses even mid-drive
+RAMP_UP      = 0.05       # seconds: 0 → full (press)
+RAMP_DOWN    = 0.05       # seconds: full → 0 (release) — slight linger for tap corrections
 
 _PKT = struct.Struct('<Bff')   # recording(uint8), left(float32), right(float32)
 
