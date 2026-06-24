@@ -36,13 +36,14 @@ from client import connect
 
 JETSON_IP  = '192.168.4.2'
 VIDEO_PORT = 5008
-SAVE_W     = 160
-SAVE_H     = 90
+SAVE_W     = 80
+SAVE_H     = 45
 JPEG_Q     = 90       # quality for saved training frames
 BASE_SPEED = 0.15
 MAX_SPEED  = 0.20
 
 _HEADER = struct.Struct('<I')
+_SAVE_Q: queue.Queue = queue.Queue(maxsize=120)   # ~4 s buffer at 30fps
 
 
 # ── Reliable receive helper ───────────────────────────────────────────────────
@@ -100,6 +101,28 @@ def _flush(csv_path, rows):
     rows.clear()
 
 
+# ── Background save worker ────────────────────────────────────────────────────
+
+def _save_worker(fdir: Path, csv_path: Path, stop: threading.Event):
+    rows: list = []
+    while not stop.is_set() or not _SAVE_Q.empty():
+        try:
+            fname, left, right, jpg_bytes = _SAVE_Q.get(timeout=0.1)
+        except queue.Empty:
+            continue
+        arr = np.frombuffer(jpg_bytes, np.uint8)
+        bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        if bgr is not None:
+            small = cv2.resize(bgr, (SAVE_W, SAVE_H), interpolation=cv2.INTER_AREA)
+            ok, enc = cv2.imencode('.jpg', small, [cv2.IMWRITE_JPEG_QUALITY, JPEG_Q])
+            if ok:
+                (fdir / fname).write_bytes(enc.tobytes())
+        rows.append((fname, left, right))
+        if len(rows) >= 200:
+            _flush(csv_path, rows)
+    _flush(csv_path, rows)
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -112,10 +135,14 @@ def main():
 
     motors = connect()
 
-    stop = threading.Event()
-    fq   = queue.Queue(maxsize=1)
+    stop     = threading.Event()
+    save_stop = threading.Event()
+    fq       = queue.Queue(maxsize=1)
     threading.Thread(
         target=_video_thread, args=(JETSON_IP, VIDEO_PORT, fq, stop), daemon=True
+    ).start()
+    threading.Thread(
+        target=_save_worker, args=(fdir, csv_path, save_stop), daemon=True
     ).start()
 
     pygame.init()
@@ -129,7 +156,6 @@ def main():
     frame_idx  = 0
     speed      = BASE_SPEED
     latest_jpg = None   # raw JPEG bytes, kept for display
-    rows: list = []     # (fname, left, right) — flushed to CSV every 200 frames
 
     try:
         while True:
@@ -168,21 +194,16 @@ def main():
             except queue.Empty:
                 pass
 
-            # save if recording
+            # save if recording — push to background thread, never block main loop
             if latest_jpg is not None and recording:
-                arr = np.frombuffer(latest_jpg, np.uint8)
-                bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-                if bgr is not None:
-                    small = cv2.resize(bgr, (SAVE_W, SAVE_H), interpolation=cv2.INTER_AREA)
-                    ok, enc = cv2.imencode('.jpg', small, [cv2.IMWRITE_JPEG_QUALITY, JPEG_Q])
-                    if ok:
-                        fname = f'{frame_idx:06d}.jpg'
-                        (fdir / fname).write_bytes(enc.tobytes())
-                        rows.append((fname, round(left, 4), round(right, 4)))
-                        frame_idx += 1
-                        if frame_idx % 200 == 0:
-                            _flush(csv_path, rows)
-                            print(f'[rec] {frame_idx} frames saved')
+                fname = f'{frame_idx:06d}.jpg'
+                try:
+                    _SAVE_Q.put_nowait((fname, round(left, 4), round(right, 4), latest_jpg))
+                    frame_idx += 1
+                    if frame_idx % 200 == 0:
+                        print(f'[rec] {frame_idx} frames queued')
+                except queue.Full:
+                    print('[rec] save queue full — frame dropped')
 
             # ── display ──────────────────────────────────────────────────────
             sw, sh = screen.get_size()
@@ -210,10 +231,10 @@ def main():
 
     finally:
         stop.set()
+        save_stop.set()
         motors.send(0.0, 0.0)
         motors.close()
         pygame.quit()
-        _flush(csv_path, rows)
         print(f'\nDone. {frame_idx} frames saved to {sess}')
 
 
