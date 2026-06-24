@@ -188,7 +188,7 @@ def main():
         conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         print(f'[label] laptop connected from {addr}')
         ts   = datetime.now().strftime('%Y%m%d_%H%M%S')
-        sess = Path(f'data/session_{ts}')
+        sess = Path(__file__).parent / f'../data/session_{ts}'
         _serve_session(conn, sess, motors)
         conn.close()
 
