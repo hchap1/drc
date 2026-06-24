@@ -146,7 +146,7 @@ def main():
                 out = model(tensor)
             left  = float(out[0, 0]) * speed_mult
             right = float(out[0, 1]) * speed_mult
-            if abs(left - right) <= 0.05 * max(abs(left), abs(right)):
+            if abs(left - right) <= 0.15 * max(abs(left), abs(right)):
                 left  *= straight_mult
                 right *= straight_mult
 
