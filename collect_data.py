@@ -25,10 +25,11 @@ import pygame
 JETSON_IP    = '192.168.4.2'
 LABEL_PORT   = 5009
 SPEED        = 0.28       # starting speed (SPACE/LSHIFT adjust)
+CORNER_SPEED = 0.24       # forward power is capped to this when turning
 STEER_OUTER  = 1.7        # outside wheel boost during turn
 STEER_INNER  = -1.5       # inside wheel — negative overrides W so it reverses even mid-drive
-RAMP_UP      = 0.2        # seconds: 0 → full (press)
-RAMP_DOWN    = 0.05       # seconds: full → 0 (release)
+RAMP_UP      = 0.25       # seconds: 0 → full (press)
+RAMP_DOWN    = 0.1        # seconds: full → 0 (release) — slight linger for tap corrections
 
 _PKT = struct.Struct('<Bff')   # recording(uint8), left(float32), right(float32)
 
@@ -107,12 +108,15 @@ def main():
             keys  = pygame.key.get_pressed()
             target_l = target_r = 0.0
 
+            turning = keys[pygame.K_a] or keys[pygame.K_d]
+            fwd = min(speed, CORNER_SPEED) if turning else speed
+
             if keys[pygame.K_w]:
-                target_l += speed
-                target_r += speed
+                target_l += fwd
+                target_r += fwd
             if keys[pygame.K_s]:
-                target_l -= speed
-                target_r -= speed
+                target_l -= fwd
+                target_r -= fwd
             if keys[pygame.K_a]:
                 target_l += speed * STEER_INNER   # inside wheel (negative = reverse)
                 target_r += speed * STEER_OUTER   # outside wheel
