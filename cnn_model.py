@@ -9,8 +9,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-IMG_W     = 80
-IMG_H     = 45
+IMG_W     = 160
+IMG_H     = 90
 MAX_SPEED = 0.20
 
 
@@ -28,8 +28,8 @@ class DrivingCNN(nn.Module):
     Input : (batch, 3, IMG_H, IMG_W) — float, range [-1, 1]
     Output: (batch, 2)               — [left_motor, right_motor] in [-MAX_SPEED, MAX_SPEED]
 
-    Input 80×45: after 3 stride-2 convs → W=10, H=6 feature map.
-    AdaptiveAvgPool2d((3,5)): 6÷3=2, 10÷5=2 → exact integer strides, MPS-safe.
+    Input 160×90: after 3 stride-2 convs → W=20, H=12 feature map.
+    AdaptiveAvgPool2d((3,5)): 12÷3=4, 20÷5=4 → exact integer strides, MPS-safe.
     64×3×5 = 960 → Linear head.
     """
 
@@ -37,10 +37,10 @@ class DrivingCNN(nn.Module):
         super().__init__()
         self._scale = max_speed
         self.features = nn.Sequential(
-            nn.Conv2d(3,  24, 5, stride=2, padding=2), nn.BatchNorm2d(24), nn.ReLU(True),  # 23×40
-            nn.Conv2d(24, 48, 5, stride=2, padding=2), nn.BatchNorm2d(48), nn.ReLU(True),  # 12×20
-            nn.Conv2d(48, 64, 3, stride=2, padding=1), nn.BatchNorm2d(64), nn.ReLU(True),  # 6×10
-            nn.Conv2d(64, 64, 3, stride=1, padding=1), nn.BatchNorm2d(64), nn.ReLU(True),  # 6×10
+            nn.Conv2d(3,  24, 5, stride=2, padding=2), nn.BatchNorm2d(24), nn.ReLU(True),  # 45×80
+            nn.Conv2d(24, 48, 5, stride=2, padding=2), nn.BatchNorm2d(48), nn.ReLU(True),  # 23×40
+            nn.Conv2d(48, 64, 3, stride=2, padding=1), nn.BatchNorm2d(64), nn.ReLU(True),  # 12×20
+            nn.Conv2d(64, 64, 3, stride=1, padding=1), nn.BatchNorm2d(64), nn.ReLU(True),  # 12×20
         )
         self.pool = nn.AdaptiveAvgPool2d((3, 5))   # → 64×3×5 = 960
         self.head = nn.Sequential(

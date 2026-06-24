@@ -3,7 +3,7 @@ jetson_collect.py — Jetson-side data collection server.
 
 The laptop runs collect_data.py which drives the robot and toggles recording.
 This script receives motor + recording packets over TCP, forwards them to the
-ESP32, and saves camera frames + labels when recording is active.
+ESP32, and saves every camera frame + the motor values current at capture time.
 
 Controls are on the LAPTOP (collect_data.py):
   W/A/S/D        drive
@@ -44,10 +44,11 @@ SENSOR_H    = 720
 FRAMERATE   = 30
 FLIP_METHOD = 2
 
-# ── Shared camera state ──────────────────────────────────────────────────────────
-_latest_frame = None
-_frame_id     = 0
-_frame_lock   = threading.Lock()
+# ── Shared motor/recording state (written by TCP thread, read by capture thread) ─
+_recording = False
+_left      = 0.0
+_right     = 0.0
+_state_lock = threading.Lock()
 
 _running = True
 
@@ -68,16 +69,29 @@ def _pipeline():
     )
 
 
-# ── Camera capture thread ────────────────────────────────────────────────────────
+# ── Capture thread — saves every frame at camera rate ───────────────────────────
 
-def _capture_loop(cap):
-    global _latest_frame, _frame_id
+def _capture_loop(cap, save_q, frame_idx_ref):
+    t_print = time.monotonic()
     while _running:
         ok, frame = cap.read()
-        if ok:
-            with _frame_lock:
-                _latest_frame = frame
-                _frame_id    += 1
+        if not ok:
+            continue
+
+        with _state_lock:
+            rec   = _recording
+            left  = _left
+            right = _right
+
+        if rec:
+            fname = f'{frame_idx_ref[0]:06d}.jpg'
+            save_q.put((fname, frame.copy(), left, right))  # blocks if queue full
+            frame_idx_ref[0] += 1
+
+            now = time.monotonic()
+            if now - t_print >= 1.0:
+                print(f'[rec] {frame_idx_ref[0]} frames', flush=True)
+                t_print = now
 
 
 # ── Save thread ──────────────────────────────────────────────────────────────────
@@ -126,11 +140,10 @@ def _recv_exact(sock, n):
     return bytes(buf)
 
 
-# ── Session handler for one laptop connection ────────────────────────────────────
+# ── TCP thread — updates motor state and drives ESP32 ───────────────────────────
 
-def _serve_session(conn, motors, save_q, frame_idx_ref):
-    frame_idx     = frame_idx_ref[0]
-    last_saved_id = -1
+def _serve_session(conn, motors, frame_idx_ref):
+    global _recording, _left, _right
     was_recording = False
 
     try:
@@ -141,28 +154,21 @@ def _serve_session(conn, motors, save_q, frame_idx_ref):
 
             motors.send(left, right)
 
+            with _state_lock:
+                _recording = recording
+                _left      = left
+                _right     = right
+
             if recording != was_recording:
-                print(f'[rec] {"ON" if recording else "OFF"}  ({frame_idx} frames so far)')
+                print(f'[rec] {"ON" if recording else "OFF"}  ({frame_idx_ref[0]} frames so far)',
+                      flush=True)
                 was_recording = recording
-
-            if recording:
-                with _frame_lock:
-                    frame = _latest_frame
-                    fid   = _frame_id
-
-                if frame is not None and fid != last_saved_id:
-                    fname = f'{frame_idx:06d}.jpg'
-                    try:
-                        save_q.put_nowait((fname, frame.copy(), left, right))
-                        last_saved_id = fid
-                        frame_idx    += 1
-                    except queue.Full:
-                        pass   # save thread behind — drop rather than block
 
     except (ConnectionError, OSError) as e:
         print(f'[cmd] {e}')
     finally:
-        frame_idx_ref[0] = frame_idx
+        with _state_lock:
+            _recording = False
 
 
 # ── Main ────────────────────────────────────────────────────────────────────────
@@ -175,19 +181,19 @@ def main():
     if not cap.isOpened():
         sys.exit('Could not open CSI camera — check ribbon cable and pipeline settings')
 
-    threading.Thread(target=_capture_loop, args=(cap,), daemon=True).start()
+    frame_idx_ref = [0]
+    # Queue sized for ~20 s of frames; blocking put prevents silent drops
+    save_q = queue.Queue(maxsize=600)
+
+    threading.Thread(target=_capture_loop, args=(cap, save_q, frame_idx_ref), daemon=True).start()
 
     print('Waiting for first camera frame...')
-    while True:
-        with _frame_lock:
-            if _latest_frame is not None:
-                break
-        time.sleep(0.05)
+    time.sleep(1.0)   # GStreamer pipeline takes ~0.5 s to start
     print(f'[cam] ready  ({IMG_W}×{IMG_H})')
 
     # ── Motors ────────────────────────────────────────────────────────────────────
     motors = motor_client.connect()
-    print('[motor] ESP32 connected via serial')
+    print('[motor] ESP32 connected')
 
     # ── Session directory ─────────────────────────────────────────────────────────
     ts       = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -198,7 +204,6 @@ def main():
     print(f'[sess] saving to {sess}')
 
     # ── Save thread ───────────────────────────────────────────────────────────────
-    save_q = queue.Queue(maxsize=120)
     threading.Thread(target=_save_loop, args=(save_q, fdir, csv_path), daemon=True).start()
 
     # ── Shutdown handler ──────────────────────────────────────────────────────────
@@ -218,8 +223,6 @@ def main():
     srv.settimeout(1.0)
     print(f'Listening for laptop on port {LABEL_PORT}')
 
-    frame_idx_ref = [0]
-
     try:
         while _running:
             try:
@@ -229,7 +232,7 @@ def main():
 
             conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             print(f'[cmd] laptop connected from {addr}')
-            _serve_session(conn, motors, save_q, frame_idx_ref)
+            _serve_session(conn, motors, frame_idx_ref)
             motors.send(0.0, 0.0)
             conn.close()
             print(f'[cmd] laptop disconnected  ({frame_idx_ref[0]} frames saved)')
