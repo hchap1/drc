@@ -25,8 +25,8 @@ import pygame
 JETSON_IP    = '192.168.4.2'
 LABEL_PORT   = 5009
 SPEED        = 0.3        # starting speed (SPACE/LSHIFT adjust)
-STEER_OUTER  = 1.5        # outside wheel boost during turn
-STEER_INNER  = 0.5        # inside wheel reverse during turn (reduced)
+STEER_OUTER  = 1.7        # outside wheel boost during turn
+STEER_INNER  = 0.4        # inside wheel reverse during turn (reduced)
 RAMP_UP      = 0.3        # seconds: 0 → full (press)
 RAMP_DOWN    = 0.05       # seconds: full → 0 (release)
 
