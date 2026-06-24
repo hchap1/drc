@@ -25,7 +25,7 @@ import pygame
 JETSON_IP    = '192.168.4.2'
 LABEL_PORT   = 5009
 SPEED        = 0.3        # starting speed (SPACE/LSHIFT adjust)
-STEER_MULT   = 1.5        # steering is this × speed
+STEER_MULT   = 1.125      # steering is this × speed
 RAMP_UP      = 0.3        # seconds: 0 → full (press)
 RAMP_DOWN    = 0.05       # seconds: full → 0 (release)
 
