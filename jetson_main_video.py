@@ -7,7 +7,7 @@ import threading
 import time
 import cv2
 
-import serial_client as motor_client
+import motor_client
 import video_server
 from process_cv import process_frame, PROC_W, PROC_H
 

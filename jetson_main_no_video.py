@@ -6,7 +6,7 @@
 import cv2
 import numpy as np
 
-import serial_client as motor_client
+import motor_client
 from process_cv import process_frame
 
 CAPTURE_WIDTH = 1280

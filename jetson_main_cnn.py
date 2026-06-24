@@ -18,7 +18,7 @@ import cv2
 import numpy as np
 import torch
 
-import serial_client as motor_client
+import motor_client
 import video_server
 from cnn_model import DrivingCNN, preprocess, IMG_W, IMG_H
 DEBUG_SKIP = 2    # stream every Nth frame on port 5007

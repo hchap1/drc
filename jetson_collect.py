@@ -30,7 +30,7 @@ from pathlib import Path
 
 import cv2
 
-import serial_client as motor_client
+import motor_client
 from cnn_model import IMG_W, IMG_H
 
 # ── Network ─────────────────────────────────────────────────────────────────────
