@@ -6,7 +6,7 @@ them to the ESP32 and saves frames + labels locally — no video stream needed.
 Jetson should be running:  python3 jetson_collect.py
 
 Controls
-  W/A/S/D        drive
+  W/A/S/D        drive  (additive — W+A combines)
   SPACE          speed up   |   LSHIFT  speed down
   R              toggle recording on / off
   Q / ESC        quit
@@ -22,10 +22,11 @@ import time
 
 import pygame
 
-JETSON_IP  = '192.168.4.2'
-LABEL_PORT = 5009
-STRAIGHT_SPEED = 0.25
-STEER_SPEED    = 0.20
+JETSON_IP    = '192.168.4.2'
+LABEL_PORT   = 5009
+SPEED        = 0.3        # starting speed (SPACE/LSHIFT adjust)
+STEER_MULT   = 1.5        # steering is this × speed
+RAMP_TIME    = 0.5        # seconds to go from 0 → full output
 
 _PKT = struct.Struct('<Bff')   # recording(uint8), left(float32), right(float32)
 
@@ -44,7 +45,7 @@ def _cmd_thread(ip, port, getter, stop):
             while not stop.is_set():
                 recording, left, right = getter()
                 sock.sendall(_PKT.pack(int(recording), left, right))
-                time.sleep(0.033)  # 30 Hz
+                time.sleep(0.033)   # 30 Hz
         except Exception as e:
             print(f'[cmd] {e} — reconnecting in 1 s')
         finally:
@@ -52,6 +53,14 @@ def _cmd_thread(ip, port, getter, stop):
                 try: sock.close()
                 except OSError: pass
         stop.wait(1.0)
+
+
+def _ramp(current, target, max_step):
+    """Move current toward target by at most max_step."""
+    diff = target - current
+    if abs(diff) <= max_step:
+        return target
+    return current + max_step * (1 if diff > 0 else -1)
 
 
 def main():
@@ -73,10 +82,13 @@ def main():
     tick = pygame.time.Clock()
 
     recording = False
+    speed     = SPEED
+    smooth_l  = 0.0
+    smooth_r  = 0.0
 
     try:
         while True:
-            tick.tick(60)
+            dt = tick.tick(60)   # ms
 
             for ev in pygame.event.get():
                 if ev.type == pygame.QUIT:
@@ -89,31 +101,52 @@ def main():
                         print(f'[rec] {"ON" if recording else "OFF"}')
 
             keys  = pygame.key.get_pressed()
-            left  = right = 0.0
+            target_l = target_r = 0.0
 
+            if keys[pygame.K_w]:
+                target_l += speed
+                target_r += speed
+            if keys[pygame.K_s]:
+                target_l -= speed
+                target_r -= speed
             if keys[pygame.K_a]:
-                left, right = -STEER_SPEED, STEER_SPEED
-            elif keys[pygame.K_d]:
-                left, right = STEER_SPEED, -STEER_SPEED
-            elif keys[pygame.K_w]:
-                left = right = STRAIGHT_SPEED
-            elif keys[pygame.K_s]:
-                left = right = -STRAIGHT_SPEED
+                target_l -= speed * STEER_MULT
+                target_r += speed * STEER_MULT
+            if keys[pygame.K_d]:
+                target_l += speed * STEER_MULT
+                target_r -= speed * STEER_MULT
+
+            if keys[pygame.K_SPACE]:  speed += dt / 10000
+            if keys[pygame.K_LSHIFT]: speed -= dt / 10000
+            speed = max(0.05, min(0.9, speed))
+
+            # clamp targets
+            max_out   = speed * STEER_MULT
+            target_l  = max(-max_out, min(max_out, target_l))
+            target_r  = max(-max_out, min(max_out, target_r))
+
+            # smooth: ramp at (max_out / RAMP_TIME) per second
+            max_step  = (speed * STEER_MULT / RAMP_TIME) * (dt / 1000)
+            smooth_l  = _ramp(smooth_l, target_l, max_step)
+            smooth_r  = _ramp(smooth_r, target_r, max_step)
 
             with _lock:
                 _state['recording'] = recording
-                _state['left']      = round(left,  4)
-                _state['right']     = round(right, 4)
+                _state['left']      = round(smooth_l, 4)
+                _state['right']     = round(smooth_r, 4)
 
             # ── display ──────────────────────────────────────────────────────
             sw, sh = screen.get_size()
             screen.fill((20, 20, 20))
-            screen.blit(font.render(f'L:{left:+.2f}  R:{right:+.2f}', True, (220, 220, 220)), (8, 8))
+            screen.blit(font.render(
+                f'L:{smooth_l:+.2f}  R:{smooth_r:+.2f}  spd:{speed:.2f}',
+                True, (220, 220, 220)), (8, 8))
 
             if recording:
                 screen.blit(big.render('● REC', True, (255, 40, 40)), (8, sh - 70))
             else:
-                screen.blit(font.render('R=record  W/A/S/D=drive  Q=quit', True, (130, 130, 130)), (8, sh - 30))
+                screen.blit(font.render('R=record  WASD=drive  SPACE/SHIFT=speed  Q=quit',
+                                        True, (130, 130, 130)), (8, sh - 30))
 
             pygame.display.flip()
 
