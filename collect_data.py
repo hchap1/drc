@@ -1,68 +1,40 @@
 """
 collect_data.py — run on laptop while manually driving the robot.
-Streams raw camera frames from the Jetson (port 5008) and saves each frame
-+ motor label to ./data/session_TIMESTAMP/.
+Sends motor commands to the ESP32 (UDP) AND streams labels to the Jetson (TCP)
+so the Jetson saves frames+labels locally. No video stream needed.
 
-Jetson should be running:  python3 jetson_collect.py   (fast, no CV overhead)
+Jetson should be running:  python3 jetson_collect.py
 
 Controls
-  W/A/S/D        drive  (same as pygame_control.py)
+  W/A/S/D        drive
   SPACE          speed up   |   LSHIFT  speed down
   R              toggle recording on / off
-  Q / ESC        quit  (auto-saves CSV)
+  Q / ESC        quit
 
-Output layout
-  data/
-    session_20241015_143022/
-      frames/
-        000000.jpg  000001.jpg  ...   (160×90 JPEG)
-      labels.csv                       frame,left,right
+After the session, copy data off the Jetson:
+  scp -r user@192.168.4.2:~/drc/data ./data
 """
 
-import csv
-import io
-import queue
 import socket
 import struct
 import threading
-from datetime import datetime
-from pathlib import Path
+import time
 
-import cv2
-import numpy as np
 import pygame
 
 from client import connect
 
-JETSON_IP  = '192.168.4.2'
-VIDEO_PORT = 5008
-SAVE_W     = 80
-SAVE_H     = 45
-JPEG_Q     = 90       # quality for saved training frames
-BASE_SPEED = 0.15
-MAX_SPEED  = 0.20
+JETSON_IP    = '192.168.4.2'
+LABEL_PORT   = 5009          # Jetson listens here for label packets
+BASE_SPEED   = 0.15
+MAX_SPEED    = 0.20
 
-_HEADER = struct.Struct('<I')
-_SAVE_Q: queue.Queue = queue.Queue(maxsize=120)   # ~4 s buffer at 30fps
+# 9-byte label packet: recording(uint8) left(float32) right(float32)
+_PKT = struct.Struct('<Bff')
 
 
-# ── Reliable receive helper ───────────────────────────────────────────────────
-
-def _recv_exact(sock, n):
-    buf = bytearray(n)
-    mv  = memoryview(buf)
-    pos = 0
-    while pos < n:
-        got = sock.recv_into(mv[pos:], n - pos)
-        if not got:
-            raise ConnectionError('server disconnected')
-        pos += got
-    return bytes(buf)
-
-
-# ── Background video receiver (auto-reconnects) ───────────────────────────────
-
-def _video_thread(ip, port, fq, stop):
+def _label_thread(ip, port, getter, stop):
+    """Continuously sends label packets to the Jetson. Auto-reconnects."""
     while not stop.is_set():
         sock = None
         try:
@@ -71,15 +43,13 @@ def _video_thread(ip, port, fq, stop):
             sock.connect((ip, port))
             sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             sock.settimeout(None)
-            print(f'[video] connected to {ip}:{port}')
+            print(f'[label] connected to Jetson {ip}:{port}')
             while not stop.is_set():
-                (n,) = _HEADER.unpack(_recv_exact(sock, _HEADER.size))
-                data = _recv_exact(sock, n)
-                try:    fq.get_nowait()
-                except queue.Empty: pass
-                fq.put(data)
+                recording, left, right = getter()
+                sock.sendall(_PKT.pack(int(recording), left, right))
+                time.sleep(0.05)   # 20 Hz
         except Exception as e:
-            print(f'[video] {e} — reconnecting in 1 s')
+            print(f'[label] {e} — reconnecting in 1 s')
         finally:
             if sock:
                 try: sock.close()
@@ -87,76 +57,33 @@ def _video_thread(ip, port, fq, stop):
         stop.wait(1.0)
 
 
-# ── CSV flusher (append so partial sessions survive crashes) ──────────────────
-
-def _flush(csv_path, rows):
-    if not rows:
-        return
-    write_header = not csv_path.exists()
-    with open(csv_path, 'a', newline='') as f:
-        w = csv.writer(f)
-        if write_header:
-            w.writerow(['frame', 'left', 'right'])
-        w.writerows(rows)
-    rows.clear()
-
-
-# ── Background save worker ────────────────────────────────────────────────────
-
-def _save_worker(fdir: Path, csv_path: Path, stop: threading.Event):
-    rows: list = []
-    while not stop.is_set() or not _SAVE_Q.empty():
-        try:
-            fname, left, right, jpg_bytes = _SAVE_Q.get(timeout=0.1)
-        except queue.Empty:
-            continue
-        arr = np.frombuffer(jpg_bytes, np.uint8)
-        bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-        if bgr is not None:
-            small = cv2.resize(bgr, (SAVE_W, SAVE_H), interpolation=cv2.INTER_AREA)
-            ok, enc = cv2.imencode('.jpg', small, [cv2.IMWRITE_JPEG_QUALITY, JPEG_Q])
-            if ok:
-                (fdir / fname).write_bytes(enc.tobytes())
-        rows.append((fname, left, right))
-        if len(rows) >= 200:
-            _flush(csv_path, rows)
-    _flush(csv_path, rows)
-
-
-# ── Main ──────────────────────────────────────────────────────────────────────
-
 def main():
-    ts   = datetime.now().strftime('%Y%m%d_%H%M%S')
-    sess = Path(f'data/session_{ts}')
-    fdir = sess / 'frames'
-    fdir.mkdir(parents=True, exist_ok=True)
-    csv_path = sess / 'labels.csv'
-    print(f'Session directory: {sess}')
-
     motors = connect()
 
-    stop     = threading.Event()
-    save_stop = threading.Event()
-    fq       = queue.Queue(maxsize=1)
+    # shared state read by label thread
+    _state = {'recording': False, 'left': 0.0, 'right': 0.0}
+    _lock  = threading.Lock()
+
+    def getter():
+        with _lock:
+            return _state['recording'], _state['left'], _state['right']
+
+    stop = threading.Event()
     threading.Thread(
-        target=_video_thread, args=(JETSON_IP, VIDEO_PORT, fq, stop), daemon=True
-    ).start()
-    threading.Thread(
-        target=_save_worker, args=(fdir, csv_path, save_stop), daemon=True
+        target=_label_thread, args=(JETSON_IP, LABEL_PORT, getter, stop), daemon=True
     ).start()
 
     pygame.init()
-    screen = pygame.display.set_mode((640, 360), pygame.RESIZABLE)
-    pygame.display.set_caption('DRC — Data Collection')
-    font  = pygame.font.SysFont(None, 28)
-    big   = pygame.font.SysFont(None, 64)
-    tick  = pygame.time.Clock()
+    screen = pygame.display.set_mode((480, 160), pygame.RESIZABLE)
+    pygame.display.set_caption('DRC — Data Collection (Jetson saving)')
+    font = pygame.font.SysFont(None, 28)
+    big  = pygame.font.SysFont(None, 64)
+    tick = pygame.time.Clock()
 
-    recording    = False
-    frame_idx    = 0
-    speed        = BASE_SPEED
-    latest_jpg   = None   # raw JPEG bytes, kept for display
-    motor_timer  = 0      # ms accumulator for throttled UDP sends
+    recording   = False
+    frame_count = 0       # approximate — actual count lives on Jetson
+    speed       = BASE_SPEED
+    motor_timer = 0
 
     try:
         while True:
@@ -171,7 +98,7 @@ def main():
                     if ev.key == pygame.K_r:
                         recording = not recording
                         tag = 'ON ' if recording else 'OFF'
-                        print(f'[rec] {tag} — {frame_idx} frames saved')
+                        print(f'[rec] {tag}')
 
             keys  = pygame.key.get_pressed()
             left  = right = 0.0
@@ -187,42 +114,25 @@ def main():
 
             left  = max(-MAX_SPEED, min(MAX_SPEED, left))
             right = max(-MAX_SPEED, min(MAX_SPEED, right))
+
             motor_timer += dt
-            if motor_timer >= 50:   # send at 20 Hz, not 60 Hz
+            if motor_timer >= 50:   # 20 Hz
                 motors.send(left, right)
                 motor_timer = 0
 
-            # pull latest frame
-            try:
-                latest_jpg = fq.get_nowait()
-            except queue.Empty:
-                pass
+            with _lock:
+                _state['recording'] = recording
+                _state['left']      = round(left,  4)
+                _state['right']     = round(right, 4)
 
-            # save if recording — push to background thread, never block main loop
-            if latest_jpg is not None and recording:
-                fname = f'{frame_idx:06d}.jpg'
-                try:
-                    _SAVE_Q.put_nowait((fname, round(left, 4), round(right, 4), latest_jpg))
-                    frame_idx += 1
-                    if frame_idx % 200 == 0:
-                        print(f'[rec] {frame_idx} frames queued')
-                except queue.Full:
-                    print('[rec] save queue full — frame dropped')
+            if recording:
+                frame_count += 1   # rough estimate for HUD
 
             # ── display ──────────────────────────────────────────────────────
             sw, sh = screen.get_size()
-            if latest_jpg is not None:
-                try:
-                    surf = pygame.image.load(io.BytesIO(latest_jpg))
-                    surf = pygame.transform.scale(surf, (sw, sh))
-                    screen.blit(surf, (0, 0))
-                except Exception:
-                    screen.fill((30, 30, 30))
-            else:
-                screen.fill((30, 30, 30))
-                screen.blit(font.render('Waiting for video…', True, (160, 160, 160)), (sw // 2 - 80, sh // 2))
+            screen.fill((20, 20, 20))
 
-            hud = f'L:{left:+.2f}  R:{right:+.2f}  spd:{speed:.2f}  saved:{frame_idx}'
+            hud = f'L:{left:+.2f}  R:{right:+.2f}  spd:{speed:.2f}  ~frames:{frame_count}'
             screen.blit(font.render(hud, True, (220, 220, 220)), (8, 8))
 
             if recording:
@@ -235,11 +145,11 @@ def main():
 
     finally:
         stop.set()
-        save_stop.set()
         motors.send(0.0, 0.0)
         motors.close()
         pygame.quit()
-        print(f'\nDone. {frame_idx} frames saved to {sess}')
+        print('\nDone. Copy data from Jetson with:')
+        print(f'  scp -r user@{JETSON_IP}:~/drc/data ./data')
 
 
 if __name__ == '__main__':
