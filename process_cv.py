@@ -8,8 +8,8 @@ BLUE_LOW    = np.array([90,  60,  30])
 BLUE_HIGH   = np.array([130, 255, 255])
 
 # ── Constants ─────────────────────────────────────────────────────────────────
-PROC_W = 160
-PROC_H = 90
+PROC_W = 80
+PROC_H = 45
 
 MIN_AREA       = 200   # minimum blob pixels to consider a line real
 HORIZ_THRESH   = 30    # line angle below this (deg from horizontal) = wall dead ahead
