@@ -6,9 +6,8 @@ Dependencies:
   pip install torch torchvision opencv-python tqdm
 
 Usage:
-  python train_cnn.py               # trains on ./data/,  saves model.pt + model_weights.pth
-  python train_cnn.py --data /path  # custom data root
-  python train_cnn.py --epochs 150
+  python train_cnn.py run1          # train on run1/session_*,  saves model files into run1/
+  python train_cnn.py run1 --epochs 150
 
 Outputs:
   model.pt           TorchScript — load with torch.jit.load() anywhere

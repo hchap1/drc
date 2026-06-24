@@ -48,7 +48,7 @@ STEP 3 — COPY MODEL TO JETSON
 
 On the LAPTOP:
 
-    scp -r run1 user@192.168.4.2:~/drc/run1
+    scp -r run1 user@192.168.4.1:~/drc/run1
 
 This copies the entire run folder (including the model files) across.
 

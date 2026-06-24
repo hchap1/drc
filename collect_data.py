@@ -11,8 +11,8 @@ Controls
   R              toggle recording on / off
   Q / ESC        quit
 
-After the session, copy data from the Jetson:
-  scp -r user@192.168.4.1:~/drc/data ./data
+After the session, copy data from the Jetson (or use data_push.py / data_server.py):
+  scp -r user@192.168.4.1:~/data ./data
 """
 
 import socket
@@ -164,7 +164,7 @@ def main():
         stop.set()
         pygame.quit()
         print('\nDone. Copy data from Jetson:')
-        print(f'  scp -r user@{JETSON_IP}:~/drc/data ./data')
+        print(f'  scp -r user@{JETSON_IP}:~/data ./data')
 
 
 if __name__ == '__main__':
