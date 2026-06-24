@@ -162,6 +162,7 @@ def _controller_loop(device):
     Read evdev events and update _ctrl state.
     Detects left-trigger threshold crossings and fires rumble + log messages.
     """
+    global _running
     caps_abs  = dict(device.capabilities(absval=True).get(ecodes.EV_ABS, []))
     was_rec   = False
 
@@ -203,7 +204,6 @@ def _controller_loop(device):
 
     except OSError as e:
         print(f'[controller] disconnected: {e}')
-        global _running
         _running = False
 
 
