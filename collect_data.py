@@ -114,11 +114,11 @@ def main():
                 target_l -= speed
                 target_r -= speed
             if keys[pygame.K_a]:
-                target_l -= speed * STEER_INNER   # inside wheel (left)
-                target_r += speed * STEER_OUTER   # outside wheel (right)
+                target_l += speed * STEER_INNER   # inside wheel (negative = reverse)
+                target_r += speed * STEER_OUTER   # outside wheel
             if keys[pygame.K_d]:
-                target_l += speed * STEER_OUTER   # outside wheel (left)
-                target_r -= speed * STEER_INNER   # inside wheel (right)
+                target_l += speed * STEER_OUTER   # outside wheel
+                target_r += speed * STEER_INNER   # inside wheel (negative = reverse)
 
             if keys[pygame.K_SPACE]:  speed += dt / 10000
             if keys[pygame.K_LSHIFT]: speed -= dt / 10000
