@@ -25,7 +25,8 @@ import pygame
 JETSON_IP    = '192.168.4.2'
 LABEL_PORT   = 5009
 SPEED        = 0.3        # starting speed (SPACE/LSHIFT adjust)
-STEER_MULT   = 1.125      # steering is this × speed
+STEER_OUTER  = 1.5        # outside wheel boost during turn
+STEER_INNER  = 0.5        # inside wheel reverse during turn (reduced)
 RAMP_UP      = 0.3        # seconds: 0 → full (press)
 RAMP_DOWN    = 0.05       # seconds: full → 0 (release)
 
@@ -113,11 +114,11 @@ def main():
                 target_l -= speed
                 target_r -= speed
             if keys[pygame.K_a]:
-                target_l -= speed * STEER_MULT
-                target_r += speed * STEER_MULT
+                target_l -= speed * STEER_INNER   # inside wheel (left)
+                target_r += speed * STEER_OUTER   # outside wheel (right)
             if keys[pygame.K_d]:
-                target_l += speed * STEER_MULT
-                target_r -= speed * STEER_MULT
+                target_l += speed * STEER_OUTER   # outside wheel (left)
+                target_r -= speed * STEER_INNER   # inside wheel (right)
 
             if keys[pygame.K_SPACE]:  speed += dt / 10000
             if keys[pygame.K_LSHIFT]: speed -= dt / 10000
@@ -129,7 +130,7 @@ def main():
             target_r  = max(-max_out, min(max_out, target_r))
 
             # smooth: asymmetric ramp — slow up, fast down
-            max_out    = speed * STEER_MULT
+            max_out    = speed * STEER_OUTER
             step_up    = (max_out / RAMP_UP)   * (dt / 1000)
             step_down  = (max_out / RAMP_DOWN) * (dt / 1000)
             smooth_l   = _ramp(smooth_l, target_l, step_up, step_down)
