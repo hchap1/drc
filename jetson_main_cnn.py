@@ -74,9 +74,13 @@ def _capture_loop(cap):
 # ── Model loading ─────────────────────────────────────────────────────────────
 
 def _load_model(args):
-    use_trt = False
+    if args.model:
+        path = args.model
+    elif args.num is not None:
+        path = f'model{args.num}.pt'
+    else:
+        sys.exit('Specify a model with --num N (e.g. --num 3) or --model path/to/model.pt')
 
-    path = args.model or 'model.pt'
     if not os.path.exists(path):
         sys.exit(f'Model not found: {path}')
 
@@ -94,7 +98,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('speed_mult', nargs='?', type=float, default=1.0,
                     help='motor output multiplier, e.g. 1.05 = 5%% faster (default 1.0)')
-    ap.add_argument('--model',  default=None)
+    ap.add_argument('--num',    type=int,   default=None, help='model number, e.g. --num 3 loads model3.pt')
+    ap.add_argument('--model',  default=None,             help='explicit model path (overrides --num)')
     ap.add_argument('--trt',    action='store_true')
     ap.add_argument('--no-trt', action='store_true', dest='no_trt')
     args = ap.parse_args()

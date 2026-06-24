@@ -112,8 +112,12 @@ def main():
     ap.add_argument('--epochs', type=int,   default=EPOCHS)
     ap.add_argument('--batch',  type=int,   default=BATCH)
     ap.add_argument('--lr',     type=float, default=LR)
-    ap.add_argument('--out',    default='model.pt')
     args = ap.parse_args()
+
+    # find next available model number
+    n = 1
+    while Path(f'model{n}.pt').exists():
+        n += 1
 
     if torch.cuda.is_available():
         device = torch.device('cuda')
@@ -186,14 +190,12 @@ def main():
     model.load_state_dict(best_state)
     model.eval().cpu()
 
-    out_path = Path(args.out)
+    pt_path   = Path(f'model{n}.pt')
+    onnx_path = Path(f'model{n}.onnx')
 
-    # TorchScript — drop onto Jetson and run directly
     traced = torch.jit.trace(model, torch.zeros(1, 3, IMG_H, IMG_W))
-    traced.save(str(out_path))
+    traced.save(str(pt_path))
 
-    # ONNX — for trtexec conversion on Jetson (no extra packages needed)
-    onnx_path = out_path.with_name('model.onnx')
     torch.onnx.export(
         model,
         torch.zeros(1, 3, IMG_H, IMG_W),
@@ -203,14 +205,10 @@ def main():
         opset_version = 11,
     )
 
-    print(f'\nSaved {out_path}   (TorchScript)')
+    print(f'\nSaved {pt_path}   (TorchScript)')
     print(f'Saved {onnx_path}  (ONNX — for TensorRT via trtexec)')
     print(f'Best val loss: {best_val:.6f}')
-    print('\nJetson steps:')
-    print('  1. Copy model.pt → run:  python3 jetson_main_cnn.py  (CUDA, ~30fps)')
-    print('  2. Copy model.onnx → run:')
-    print('       trtexec --onnx=model.onnx --saveEngine=model.trt --fp16')
-    print('     (trtexec ships with JetPack — no install needed)')
+    print(f'\nJetson: python3 jetson_main_cnn.py --num {n}')
 
 
 if __name__ == '__main__':
