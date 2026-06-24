@@ -1,13 +1,13 @@
 """
 jetson_collect.py — run on Jetson during manual data collection.
-Listens for label packets from collect_data.py (port 5009), captures frames
-from the CSI camera, and saves frames + labels to ~/drc/data/session_TIMESTAMP/.
+Receives motor commands from the laptop (port 5009), forwards them to the
+ESP32, and saves frames + labels locally when recording is active.
 
-No video stream needed — eliminates WiFi bandwidth entirely.
+No video stream, no label channel — laptop just sends drive commands here.
 
 Usage:
-  python3 jetson_collect.py
-  # then on laptop: python3 collect_data.py
+  Jetson:  python3 jetson_collect.py
+  Laptop:  python3 collect_data.py
 
 After the session, copy data to laptop/PC for training:
   scp -r user@192.168.4.2:~/drc/data ./data
@@ -25,17 +25,19 @@ from pathlib import Path
 
 import cv2
 
+import client as motor_client
 from cnn_model import IMG_W, IMG_H
 
 LABEL_PORT  = 5009
+ESP32_IP    = '192.168.4.1'
 JPEG_Q      = 90
 
 SENSOR_W    = 1280
 SENSOR_H    = 720
 FRAMERATE   = 30
-FLIP_METHOD = 2   # 180° — camera is upside-down
+FLIP_METHOD = 2
 
-_PKT = struct.Struct('<Bff')   # recording, left, right
+_PKT = struct.Struct('<Bff')   # recording(uint8), left(float32), right(float32)
 
 
 def _pipeline():
@@ -90,7 +92,7 @@ def _flush(csv_path, rows):
     rows.clear()
 
 
-def _serve_session(conn, sess_dir):
+def _serve_session(conn, sess_dir, motors):
     fdir     = sess_dir / 'frames'
     csv_path = sess_dir / 'labels.csv'
     fdir.mkdir(parents=True, exist_ok=True)
@@ -105,6 +107,9 @@ def _serve_session(conn, sess_dir):
             data = _recv_exact(conn, _PKT.size)
             recording, left, right = _PKT.unpack(data)
             recording = bool(recording)
+
+            # forward to ESP32
+            motors.send(left, right)
 
             if recording and not was_rec:
                 print('[rec] ON')
@@ -131,6 +136,7 @@ def _serve_session(conn, sess_dir):
     except Exception as e:
         print(f'[session] ended: {e}')
     finally:
+        motors.send(0.0, 0.0)
         _flush(csv_path, rows)
         print(f'[session] {frame_idx} frames total → {sess_dir}')
 
@@ -144,7 +150,6 @@ def main():
 
     threading.Thread(target=_capture_loop, args=(cap,), daemon=True).start()
 
-    # wait for first frame
     print('Waiting for camera...')
     while True:
         with _frame_lock:
@@ -153,6 +158,9 @@ def main():
         time.sleep(0.05)
     print(f'Camera ready  ({IMG_W}×{IMG_H})')
 
+    motors = motor_client.connect(ESP32_IP)
+    print(f'ESP32 connected at {ESP32_IP}')
+
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     srv.bind(('', LABEL_PORT))
@@ -160,7 +168,10 @@ def main():
     print(f'Listening for laptop on port {LABEL_PORT}  (Ctrl-C to stop)')
 
     def _shutdown(sig, frame):
+        global _running
         _running = False
+        motors.send(0.0, 0.0)
+        motors.close()
         cap.release()
         srv.close()
         sys.exit(0)
@@ -173,7 +184,7 @@ def main():
         print(f'[label] laptop connected from {addr}')
         ts   = datetime.now().strftime('%Y%m%d_%H%M%S')
         sess = Path(f'data/session_{ts}')
-        _serve_session(conn, sess)
+        _serve_session(conn, sess, motors)
         conn.close()
 
 
