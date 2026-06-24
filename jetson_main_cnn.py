@@ -1,19 +1,11 @@
 """
 jetson_main_cnn.py — autonomous driving via the trained CNN.
 
-Automatically uses TensorRT if model_trt.pt exists, otherwise falls back
-to the plain TorchScript model.pt.  Debug feed on port 5007 shows the
-frame at exactly 160×90 — the resolution the CNN was trained on.
+Usage:
+  python3 jetson_main_cnn.py <folder>           loads <folder>/model.pt
+  python3 jetson_main_cnn.py <folder> 1.05      same with 5% speed boost
 
-Workflow:
-  1. python3 convert_trt.py          # one-time conversion (needs torch2trt)
-  2. python3 jetson_main_cnn.py      # drives autonomously
-  3. python3 view_camera_feed.py     # watch from laptop (port 5007)
-
-Args:
-  --model    override model file (default: auto-detect model_trt.pt → model.pt)
-  --trt      force TensorRT even if auto-detect would pick otherwise
-  --no-trt   force plain TorchScript
+  python3 view_camera_feed.py    (laptop) — watch the debug feed on port 5007
 """
 
 import argparse
@@ -74,20 +66,14 @@ def _capture_loop(cap):
 # ── Model loading ─────────────────────────────────────────────────────────────
 
 def _load_model(args):
-    if args.model:
-        path = args.model
-    elif args.num is not None:
-        path = f'model{args.num}.pt'
-    else:
-        sys.exit('Specify a model with --num N (e.g. --num 3) or --model path/to/model.pt')
-
+    path = os.path.join(args.folder, 'model.pt')
     if not os.path.exists(path):
         sys.exit(f'Model not found: {path}')
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     model  = torch.jit.load(path, map_location=device).eval()
     print(f'[model] TorchScript on {device}  ← {path}')
-    return model, device, False
+    return model, device
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -96,15 +82,12 @@ def main():
     global _running
 
     ap = argparse.ArgumentParser()
+    ap.add_argument('folder',     help='model folder containing model.pt (e.g. run1)')
     ap.add_argument('speed_mult', nargs='?', type=float, default=1.0,
                     help='motor output multiplier, e.g. 1.05 = 5%% faster (default 1.0)')
-    ap.add_argument('--num',    type=int,   default=None, help='model number, e.g. --num 3 loads model3.pt')
-    ap.add_argument('--model',  default=None,             help='explicit model path (overrides --num)')
-    ap.add_argument('--trt',    action='store_true')
-    ap.add_argument('--no-trt', action='store_true', dest='no_trt')
     args = ap.parse_args()
 
-    model, device_str, use_trt = _load_model(args)
+    model, device_str = _load_model(args)
     device = torch.device(device_str)
     speed_mult = args.speed_mult
     if speed_mult != 1.0:
@@ -166,8 +149,7 @@ def main():
 
             if frame_n % DEBUG_SKIP == 0:
                 dbg = frame.copy()
-                mode = 'TRT' if use_trt else 'PT'
-                cv2.putText(dbg, f'{mode}  L:{left:+.3f}  R:{right:+.3f}',
+                cv2.putText(dbg, f'PT  L:{left:+.3f}  R:{right:+.3f}',
                             (4, 14), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
                 debug_vid.send(dbg)
 

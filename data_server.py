@@ -1,14 +1,15 @@
 """
 data_server.py — run on LAPTOP to receive training data from the Jetson.
-Creates a 'data/' folder in whatever directory you run this from.
+Creates the named folder in whatever directory you run this from.
 
 Usage:
-  python3 data_server.py
+  python3 data_server.py <folder>        e.g.  python3 data_server.py run1
 
 Then on the Jetson:
   python3 data_push.py <this-laptop-ip>
 """
 
+import argparse
 import socket
 import struct
 import sys
@@ -44,7 +45,11 @@ def _recv_exact(sock, n):
 
 
 def main():
-    out = Path('data')
+    ap = argparse.ArgumentParser()
+    ap.add_argument('folder', help='folder to create and receive data into (e.g. run1)')
+    args = ap.parse_args()
+
+    out = Path(args.folder)
     out.mkdir(exist_ok=True)
 
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

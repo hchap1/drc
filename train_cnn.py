@@ -108,16 +108,11 @@ def _epoch(model, loader, criterion, optimiser, device, train: bool):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--data',   default='data')
+    ap.add_argument('data',             help='folder containing session_* training data (model saved here too)')
     ap.add_argument('--epochs', type=int,   default=EPOCHS)
     ap.add_argument('--batch',  type=int,   default=BATCH)
     ap.add_argument('--lr',     type=float, default=LR)
     args = ap.parse_args()
-
-    # find next available model number
-    n = 1
-    while Path(f'model{n}.pt').exists():
-        n += 1
 
     if torch.cuda.is_available():
         device = torch.device('cuda')
@@ -129,6 +124,8 @@ def main():
 
     # ── Sessions ─────────────────────────────────────────────────────────────
     data_root = Path(args.data)
+    if not data_root.is_dir():
+        raise SystemExit(f'Folder not found: {data_root}')
     sessions  = sorted(s for s in data_root.glob('session_*') if (s / 'labels.csv').exists())
     if not sessions:
         raise SystemExit(f'No sessions with labels.csv found under {data_root}')
@@ -195,11 +192,14 @@ def main():
     model.load_state_dict(best_state)
     model.eval().cpu()
 
-    pt_path   = Path(f'model{n}.pt')
-    onnx_path = Path(f'model{n}.onnx')
+    pt_path   = data_root / 'model.pt'
+    onnx_path = data_root / 'model.onnx'
+    pth_path  = data_root / 'model_weights.pth'
 
     traced = torch.jit.trace(model, torch.zeros(1, 3, IMG_H, IMG_W))
     traced.save(str(pt_path))
+
+    torch.save(model.state_dict(), str(pth_path))
 
     torch.onnx.export(
         model,
@@ -211,9 +211,10 @@ def main():
     )
 
     print(f'\nSaved {pt_path}   (TorchScript)')
+    print(f'Saved {pth_path}  (state dict)')
     print(f'Saved {onnx_path}  (ONNX — for TensorRT via trtexec)')
     print(f'Best val loss: {best_val:.6f}')
-    print(f'\nJetson: python3 jetson_main_cnn.py --num {n}')
+    print(f'\nJetson: python3 jetson_main_cnn.py {args.data}')
 
 
 if __name__ == '__main__':
