@@ -24,8 +24,8 @@ import pygame
 
 JETSON_IP  = '192.168.4.2'
 LABEL_PORT = 5009
-BASE_SPEED = 0.15
-MAX_SPEED  = 0.20
+BASE_SPEED = 0.225
+MAX_SPEED  = 0.30
 
 _PKT = struct.Struct('<Bff')   # recording(uint8), left(float32), right(float32)
 
@@ -44,7 +44,7 @@ def _cmd_thread(ip, port, getter, stop):
             while not stop.is_set():
                 recording, left, right = getter()
                 sock.sendall(_PKT.pack(int(recording), left, right))
-                time.sleep(0.05)   # 20 Hz
+                time.sleep(0.033)  # 30 Hz
         except Exception as e:
             print(f'[cmd] {e} — reconnecting in 1 s')
         finally:
