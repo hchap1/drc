@@ -18,11 +18,9 @@ import cv2
 import numpy as np
 import torch
 
-import client as motor_client
+import serial_client as motor_client
 import video_server
 from cnn_model import DrivingCNN, preprocess, IMG_W, IMG_H
-
-ESP32_IP   = '192.168.4.1'
 DEBUG_SKIP = 2    # stream every Nth frame on port 5007
 
 SENSOR_W    = 1280
@@ -105,7 +103,7 @@ def main():
 
     threading.Thread(target=_capture_loop, args=(cap,), daemon=True).start()
 
-    motors    = motor_client.connect(ESP32_IP)
+    motors    = motor_client.connect()
     # stream_width=None → send at native 160×90 so viewer sees exactly what the CNN sees
     debug_vid = video_server.serve(port=5007, jpeg_quality=80, stream_width=None)
     print(f'Debug feed on port 5007  ({IMG_W}×{IMG_H})')

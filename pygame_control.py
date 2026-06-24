@@ -11,7 +11,7 @@ import pygame
 
 from client import connect
 
-JETSON_IP = '192.168.4.2'
+JETSON_IP = '192.168.4.1'
 PORT = 5007
 _HEADER = struct.Struct('<I')
 RECONNECT_DELAY = 1.0   # seconds to wait between reconnect attempts
@@ -67,7 +67,7 @@ def _receiver(ip: str, port: int, frame_queue: queue.Queue,
 
 
 def main(ip: str = JETSON_IP, port: int = PORT) -> None:
-    c = connect()
+    c = connect(JETSON_IP)
 
     stop_event = threading.Event()
     frame_queue: queue.Queue = queue.Queue(maxsize=1)

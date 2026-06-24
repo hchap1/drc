@@ -7,11 +7,9 @@ import threading
 import time
 import cv2
 
-import client as motor_client
+import serial_client as motor_client
 import video_server
 from process_cv import process_frame, PROC_W, PROC_H
-
-ESP32_IP = '192.168.4.1'
 
 SENSOR_WIDTH  = 1280
 SENSOR_HEIGHT = 720
@@ -75,7 +73,7 @@ def main():
 
     threading.Thread(target=_capture_loop, args=(cap,), daemon=True).start()
 
-    motors    = motor_client.connect(ESP32_IP)
+    motors    = motor_client.connect()
     debug_vid = video_server.serve(port=5007)
     raw_vid   = video_server.serve(port=5008, stream_width=None)   # full-res for collect_data.py
 

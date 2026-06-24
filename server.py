@@ -1,20 +1,20 @@
 # server.py
-# Runs on the ESP32 (MicroPython). Listens for UDP power commands and
-# drives the motors directly from the receive loop -- no queues, no
-# polling, no thread handoff. A packet arriving is the only thing that
-# triggers work.
+# Runs on the ESP32 (MicroPython). Reads motor power commands from the USB
+# serial connection (the same port used for flashing/REPL) and drives the
+# motors directly. A 4-byte little-endian packet (<hh) encodes left and
+# right motor power as integers scaled by 1000.
 #
 # To run on boot, copy this onto the device as main.py (or import it
 # from your existing main.py / boot.py).
 
-import socket
+import sys
+import uselect
 import struct
 import time
 from machine import Pin, PWM
 
-PORT = 5005
 WATCHDOG_TIMEOUT_MS = 500   # if no packet arrives for this long, stop motors
-SOCK_TIMEOUT_S = 0.2        # how often we wake up (when idle) to check the watchdog
+POLL_TIMEOUT_MS     = 100   # poll interval when idle (for watchdog checking)
 
 
 class Motors:
@@ -60,43 +60,34 @@ class Motors:
 def run():
     motors = Motors()
 
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    except OSError:
-        pass  # not all MicroPython socket builds support this option
-    sock.bind(('0.0.0.0', PORT))
+    poll = uselect.poll()
+    poll.register(sys.stdin, uselect.POLLIN)
 
-    # Blocking recvfrom gives the lowest latency response to an arriving
-    # packet (no polling interval). The timeout only matters when NO data
-    # is arriving -- it's how we periodically check the watchdog.
-    sock.settimeout(SOCK_TIMEOUT_S)
-
-    print('Motor UDP server listening on port', PORT)
+    print('Motor serial server ready')
 
     last_rx = time.ticks_ms()
     stopped = True
+    buf = b''
 
     while True:
-        try:
-            data, addr = sock.recvfrom(16)
-        except OSError:
-            # Recv timed out -- no packet arrived in SOCK_TIMEOUT_S.
-            # This is also our only signal that a client may have vanished,
-            # since UDP has no disconnect event.
+        events = poll.poll(POLL_TIMEOUT_MS)
+
+        if events:
+            chunk = sys.stdin.buffer.read(1)
+            if chunk:
+                buf += chunk
+                while len(buf) >= 4:
+                    left_i, right_i = struct.unpack('<hh', buf[:4])
+                    buf = buf[4:]
+                    motors.setPower(left_i / 1000.0, right_i / 1000.0)
+                    last_rx = time.ticks_ms()
+                    stopped = False
+        else:
+            # Poll timed out — check watchdog
             if not stopped and time.ticks_diff(time.ticks_ms(), last_rx) > WATCHDOG_TIMEOUT_MS:
                 motors.setPower(0, 0)
                 stopped = True
-            continue
 
-        if len(data) != 4:
-            continue  # malformed/foreign packet, ignore and keep listening
 
-        try:
-            left_i, right_i = struct.unpack('<hh', data)
-        except Exception:
-            continue
-
-        motors.setPower(left_i / 1000.0, right_i / 1000.0)
-        last_rx = time.ticks_ms()
-        stopped = False
+if __name__ == '__main__':
+    run()

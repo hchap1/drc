@@ -6,10 +6,8 @@
 import cv2
 import numpy as np
 
-import client as motor_client
+import serial_client as motor_client
 from process_cv import process_frame
-
-ESP32_IP = '192.168.4.1'
 
 CAPTURE_WIDTH = 1280
 CAPTURE_HEIGHT = 720
@@ -40,7 +38,7 @@ def main():
     if not cap.isOpened():
         raise RuntimeError('Could not open CSI camera -- check the ribbon cable and pipeline settings')
 
-    motors = motor_client.connect(ESP32_IP)
+    motors = motor_client.connect()
 
     try:
         while True:

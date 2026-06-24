@@ -12,7 +12,7 @@ Controls
   Q / ESC        quit
 
 After the session, copy data from the Jetson:
-  scp -r user@192.168.4.2:~/drc/data ./data
+  scp -r user@192.168.4.1:~/drc/data ./data
 """
 
 import socket
@@ -22,7 +22,7 @@ import time
 
 import pygame
 
-JETSON_IP    = '192.168.4.2'
+JETSON_IP    = '192.168.4.1'
 LABEL_PORT   = 5009
 SPEED        = 0.24       # starting speed (SPACE/LSHIFT adjust)
 CORNER_SPEED = 0.20       # forward power is capped to this when turning

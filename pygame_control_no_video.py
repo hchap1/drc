@@ -11,10 +11,10 @@ import pygame
 
 from client import connect
 
-JETSON_IP = '192.168.4.2'
+JETSON_IP = '192.168.4.1'
 
 def main() -> None:
-    c = connect()
+    c = connect(JETSON_IP)
     pygame.init()
     screen = pygame.display.set_mode((640, 480), pygame.RESIZABLE)
     pygame.display.set_caption('Jetson feed')

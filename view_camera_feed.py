@@ -1,6 +1,6 @@
-# video_client.py
-# Run this on any machine on the ESP32 network to view the Jetson's
-# camera feed. Connects to the Jetson directly (TCP, not broadcast) and
+# view_camera_feed.py
+# Run this on the laptop to view the Jetson's camera feed.
+# Connects to the Jetson directly (TCP, not broadcast) and
 # reads length-prefixed JPEG frames. Standalone script -- just run it.
 
 import socket
@@ -9,7 +9,7 @@ import struct
 import cv2
 import numpy as np
 
-JETSON_IP = '192.168.4.2'
+JETSON_IP = '192.168.4.1'
 PORT = 5007
 _HEADER = struct.Struct('<I')
 

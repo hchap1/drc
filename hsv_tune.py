@@ -10,7 +10,7 @@ import struct
 import cv2
 import numpy as np
 
-JETSON_IP = '192.168.4.2'
+JETSON_IP = '192.168.4.1'
 PORT      = 5008
 
 _HEADER = struct.Struct('<I')
