@@ -9,7 +9,6 @@ Controls:
   Right stick X        steering
   Left trigger > 50%   recording active (hold to capture)
 
-  Controller vibrates when recording starts (strong) and stops (soft).
 
 Launch via SSH — keeps running after the connection drops:
   nohup python3 jetson_collect.py > ~/collect.log 2>&1 &
@@ -36,7 +35,7 @@ from pathlib import Path
 
 import cv2
 import evdev
-from evdev import ecodes, ff
+from evdev import ecodes
 
 import serial_client as motor_client
 from cnn_model import IMG_W, IMG_H
@@ -135,32 +134,10 @@ def _norm_axis(value, absinfo):
     return (value - mid) / half if half else 0.0
 
 
-def _rumble(device, kind):
-    """
-    Play a brief vibration effect.
-    kind='start' → strong long pulse; kind='stop' → weak short pulse.
-    Runs in its own thread so it never blocks the event loop.
-    """
-    try:
-        strong, weak, ms = (0xFFFF, 0x0000, 300) if kind == 'start' else (0x0000, 0xFFFF, 150)
-        effect = ff.Effect(
-            ff.FF_RUMBLE, -1, 0,
-            ff.Trigger(0, 0),
-            ff.Replay(ms, 0),
-            ff.EffectType(ff_rumble_effect=ff.Rumble(
-                strong_magnitude=strong, weak_magnitude=weak
-            )),
-        )
-        eid = device.upload_effect(effect)
-        device.write(ecodes.EV_FF, eid, 1)
-    except Exception as e:
-        print(f'[rumble] {e}')
-
-
 def _controller_loop(device):
     """
     Read evdev events and update _ctrl state.
-    Detects left-trigger threshold crossings and fires rumble + log messages.
+    Detects left-trigger threshold crossings and logs recording state changes.
     """
     global _running
     caps_abs  = dict(device.capabilities(absval=True).get(ecodes.EV_ABS, []))
@@ -187,11 +164,6 @@ def _controller_loop(device):
                 with _ctrl_lock:
                     _ctrl['recording'] = recording
                 if recording != was_rec:
-                    threading.Thread(
-                        target=_rumble,
-                        args=(device, 'start' if recording else 'stop'),
-                        daemon=True,
-                    ).start()
                     print(f'[rec] {"ON" if recording else "OFF"}')
                     was_rec = recording
 
