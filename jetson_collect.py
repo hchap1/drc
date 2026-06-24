@@ -55,17 +55,19 @@ def _pipeline():
 
 
 _latest_frame = None
+_frame_id     = 0          # incremented each time a new camera frame arrives
 _frame_lock   = threading.Lock()
 _running      = True
 
 
 def _capture_loop(cap):
-    global _latest_frame
+    global _latest_frame, _frame_id
     while _running:
         ok, frame = cap.read()
         if ok:
             with _frame_lock:
                 _latest_frame = frame
+                _frame_id    += 1
 
 
 def _recv_exact(sock, n):
@@ -97,9 +99,10 @@ def _serve_session(conn, sess_dir, motors):
     csv_path = sess_dir / 'labels.csv'
     fdir.mkdir(parents=True, exist_ok=True)
 
-    rows      = []
-    frame_idx = 0
-    was_rec   = False
+    rows          = []
+    frame_idx     = 0
+    was_rec       = False
+    last_saved_id = -1    # tracks which camera frame was last written to disk
 
     print(f'[session] saving to {sess_dir}')
     try:
@@ -120,9 +123,11 @@ def _serve_session(conn, sess_dir, motors):
             if recording:
                 with _frame_lock:
                     frame = _latest_frame
-                if frame is None:
-                    continue
+                    fid   = _frame_id
+                if frame is None or fid == last_saved_id:
+                    continue   # no new camera frame yet — skip this command packet
 
+                last_saved_id = fid
                 fname = f'{frame_idx:06d}.jpg'
                 ok, enc = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, JPEG_Q])
                 if ok:

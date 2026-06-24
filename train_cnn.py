@@ -147,10 +147,15 @@ def main():
     if len(val_ds) < args.batch:
         print('Too few val samples — falling back to 85/15 frame-level split')
         from torch.utils.data import random_split
-        all_ds         = DrivingDataset(sessions, augment=False)
-        n_v            = max(1, int(len(all_ds) * 0.15))
-        train_ds, val_ds = random_split(all_ds, [len(all_ds) - n_v, n_v])
-        train_ds.dataset.augment = True
+        # Load two independent copies so augment flag doesn't bleed from train into val.
+        all_aug  = DrivingDataset(sessions, augment=True)
+        all_flat = DrivingDataset(sessions, augment=False)
+        assert len(all_aug) == len(all_flat), 'session size mismatch'
+        n_v = max(1, int(len(all_aug) * 0.15))
+        g   = torch.Generator().manual_seed(42)
+        train_ds, _      = random_split(all_aug,  [len(all_aug)  - n_v, n_v], generator=g)
+        g   = torch.Generator().manual_seed(42)    # same seed → identical indices
+        _,       val_ds  = random_split(all_flat, [len(all_flat) - n_v, n_v], generator=g)
         print(f'  train: {len(train_ds)}  val: {len(val_ds)}')
 
     pin = torch.cuda.is_available()

@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.pyo
+
+# trained model artifacts — copy to Jetson manually, don't commit
+model*.pt
+model*.onnx
+model*.onnx.data
+model_weights*.pth
+convert_trt.py
