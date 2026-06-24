@@ -125,7 +125,7 @@ def main():
             speed = max(0.05, min(0.9, speed))
 
             # clamp targets
-            max_out   = speed * STEER_MULT
+            max_out   = speed * STEER_OUTER
             target_l  = max(-max_out, min(max_out, target_l))
             target_r  = max(-max_out, min(max_out, target_r))
 
