@@ -1,0 +1,81 @@
+TRAINING INSTRUCTIONS
+=====================
+
+These steps assume the Jetson and laptop are both on the robot hotspot
+(192.168.4.x) and you have already collected a session with jetson_collect.py.
+
+
+─────────────────────────────────────────────────────────────────────────────
+STEP 1 — RECEIVE DATA FROM THE JETSON
+─────────────────────────────────────────────────────────────────────────────
+
+On the LAPTOP, from the drc/ directory, pick a name for this run (e.g. run1):
+
+    python3 data_server.py run1
+
+It will print the laptop's IP address and wait. Leave it running.
+
+On the JETSON:
+
+    python3 data_push.py <laptop-ip>
+
+Both sides show a progress bar. Wait for "Done" on both terminals.
+The data now lives at  drc/run1/session_YYYYMMDD_HHMMSS/
+
+
+─────────────────────────────────────────────────────────────────────────────
+STEP 2 — TRAIN
+─────────────────────────────────────────────────────────────────────────────
+
+On the LAPTOP (or any machine with a GPU):
+
+    python3 train_cnn.py run1
+
+Optional flags:
+    --epochs 150      (default 100)
+    --batch  64       (default 64)
+    --lr     0.001    (default 0.001)
+
+When finished, the folder run1/ will contain:
+    model.pt            TorchScript — what the Jetson loads
+    model.onnx          ONNX — for TensorRT conversion (trtexec)
+    model_weights.pth   raw state dict
+
+
+─────────────────────────────────────────────────────────────────────────────
+STEP 3 — COPY MODEL TO JETSON
+─────────────────────────────────────────────────────────────────────────────
+
+On the LAPTOP:
+
+    scp -r run1 user@192.168.4.2:~/drc/run1
+
+This copies the entire run folder (including the model files) across.
+
+
+─────────────────────────────────────────────────────────────────────────────
+STEP 4 — RUN ON THE JETSON
+─────────────────────────────────────────────────────────────────────────────
+
+On the JETSON:
+
+    python3 jetson_main_cnn.py run1
+
+With an optional speed multiplier (e.g. 5% faster):
+
+    python3 jetson_main_cnn.py run1 1.05
+
+To watch the camera feed from the laptop while it drives:
+
+    python3 view_camera_feed.py
+
+
+─────────────────────────────────────────────────────────────────────────────
+NOTES
+─────────────────────────────────────────────────────────────────────────────
+
+- Collected sessions are saved to  ~/data/  on the Jetson (one level above drc/)
+- jetson_collect.py must be running on the Jetson during data collection
+- collect_data.py must be running on the laptop during data collection
+- Press R in collect_data.py to toggle recording on/off
+- The model hard-caps motor output at 0.20 regardless of speed_mult
