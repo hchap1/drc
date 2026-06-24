@@ -152,10 +152,11 @@ def main():
     big   = pygame.font.SysFont(None, 64)
     tick  = pygame.time.Clock()
 
-    recording  = False
-    frame_idx  = 0
-    speed      = BASE_SPEED
-    latest_jpg = None   # raw JPEG bytes, kept for display
+    recording    = False
+    frame_idx    = 0
+    speed        = BASE_SPEED
+    latest_jpg   = None   # raw JPEG bytes, kept for display
+    motor_timer  = 0      # ms accumulator for throttled UDP sends
 
     try:
         while True:
@@ -186,7 +187,10 @@ def main():
 
             left  = max(-MAX_SPEED, min(MAX_SPEED, left))
             right = max(-MAX_SPEED, min(MAX_SPEED, right))
-            motors.send(left, right)
+            motor_timer += dt
+            if motor_timer >= 50:   # send at 20 Hz, not 60 Hz
+                motors.send(left, right)
+                motor_timer = 0
 
             # pull latest frame
             try:
