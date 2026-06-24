@@ -80,16 +80,21 @@ def main():
     global _running
 
     ap = argparse.ArgumentParser()
-    ap.add_argument('folder',     help='model folder containing model.pt (e.g. run1)')
-    ap.add_argument('speed_mult', nargs='?', type=float, default=1.0,
+    ap.add_argument('folder',       help='model folder containing model.pt (e.g. run1)')
+    ap.add_argument('speed_mult',   nargs='?', type=float, default=1.0,
                     help='motor output multiplier, e.g. 1.05 = 5%% faster (default 1.0)')
+    ap.add_argument('straight_mult', nargs='?', type=float, default=1.0,
+                    help='extra multiplier applied only when L/R powers are within 5%% of each other (default 1.0)')
     args = ap.parse_args()
 
     model, device_str = _load_model(args)
     device = torch.device(device_str)
-    speed_mult = args.speed_mult
+    speed_mult    = args.speed_mult
+    straight_mult = args.straight_mult
     if speed_mult != 1.0:
         print(f'[speed] multiplier {speed_mult:.3f}x')
+    if straight_mult != 1.0:
+        print(f'[straight] multiplier {straight_mult:.3f}x (applied when L/R within 5%%)')
 
     # warm-up pass to avoid latency spike on first real frame
     with torch.no_grad():
@@ -141,6 +146,9 @@ def main():
                 out = model(tensor)
             left  = float(out[0, 0]) * speed_mult
             right = float(out[0, 1]) * speed_mult
+            if abs(left - right) <= 0.05 * max(abs(left), abs(right)):
+                left  *= straight_mult
+                right *= straight_mult
 
             motors.send(left, right)
             frame_n += 1

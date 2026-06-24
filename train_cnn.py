@@ -13,6 +13,7 @@ Outputs:
   model.pt           TorchScript — load with torch.jit.load() anywhere
   model_weights.pth  State dict  — used by convert_trt.py on the Jetson
 """
+# All samples from every session_* are pooled and split 90/10 (train/val) each run.
 
 import argparse
 import csv
@@ -39,30 +40,36 @@ except ImportError:
 BATCH    = 64
 EPOCHS   = 100
 LR       = 1e-3
-VAL_FRAC = 0.15
+VAL_FRAC = 0.10
 WORKERS  = 4       # set 0 on Windows if DataLoader hangs
 
 
 # ── Dataset ───────────────────────────────────────────────────────────────────
 
-class DrivingDataset(Dataset):
-    def __init__(self, sessions: list, augment: bool = False):
-        self.augment = augment
-        self.samples: list = []
+def _load_all_samples(data_root: Path) -> list:
+    """Scan all session_* dirs and return a flat list of (path, left, right)."""
+    sessions = sorted(s for s in data_root.glob('session_*') if (s / 'labels.csv').exists())
+    if not sessions:
+        raise SystemExit(f'No sessions with labels.csv found under {data_root}')
+    samples = []
+    for sess in sessions:
+        fdir = sess / 'frames'
+        with open(sess / 'labels.csv', newline='') as f:
+            for row in csv.DictReader(f):
+                p = fdir / row['frame']
+                if p.exists():
+                    samples.append((p, float(row['left']), float(row['right'])))
+    print(f'Loaded {len(samples)} samples from {len(sessions)} sessions')
+    return samples
 
-        for sess in sessions:
-            csv_path = sess / 'labels.csv'
-            fdir     = sess / 'frames'
-            if not csv_path.exists():
-                continue
-            with open(csv_path, newline='') as f:
-                for row in csv.DictReader(f):
-                    p = fdir / row['frame']
-                    if p.exists():
-                        self.samples.append((p, float(row['left']), float(row['right'])))
+
+class DrivingDataset(Dataset):
+    def __init__(self, samples: list, augment: bool = False):
+        self.augment = augment
+        self.samples = samples
 
         label = 'train' if augment else 'val'
-        print(f'  {label:5s}: {len(self.samples)} samples from {len(sessions)} sessions')
+        print(f'  {label:5s}: {len(self.samples)} samples')
 
     def __len__(self):
         return len(self.samples)
@@ -121,38 +128,22 @@ def main():
         device = torch.device('cpu')
     print(f'Device: {device}')
 
-    # ── Sessions ─────────────────────────────────────────────────────────────
+    # ── Load & split ─────────────────────────────────────────────────────────
     data_root = Path(args.data)
     if not data_root.is_dir():
         raise SystemExit(f'Folder not found: {data_root}')
-    sessions  = sorted(s for s in data_root.glob('session_*') if (s / 'labels.csv').exists())
-    if not sessions:
-        raise SystemExit(f'No sessions with labels.csv found under {data_root}')
 
-    n_val          = min(max(1, int(len(sessions) * VAL_FRAC)), len(sessions) - 1)
-    val_sessions   = sessions[-n_val:] if n_val > 0 else []
-    train_sessions = sessions[:-n_val] if n_val > 0 else sessions
+    all_samples = _load_all_samples(data_root)
+    random.shuffle(all_samples)
+    n_val         = max(1, int(len(all_samples) * VAL_FRAC))
+    val_samples   = all_samples[:n_val]
+    train_samples = all_samples[n_val:]
 
-    print(f'\nFound {len(sessions)} sessions  →  {len(train_sessions)} train / {len(val_sessions)} val')
-    train_ds = DrivingDataset(train_sessions, augment=True)
-    val_ds   = DrivingDataset(val_sessions,   augment=False)
+    train_ds = DrivingDataset(train_samples, augment=True)
+    val_ds   = DrivingDataset(val_samples,   augment=False)
 
     if len(train_ds) == 0:
         raise SystemExit('No training samples found')
-
-    if len(val_ds) < args.batch:
-        print('Too few val samples — falling back to 85/15 frame-level split')
-        from torch.utils.data import random_split
-        # Load two independent copies so augment flag doesn't bleed from train into val.
-        all_aug  = DrivingDataset(sessions, augment=True)
-        all_flat = DrivingDataset(sessions, augment=False)
-        assert len(all_aug) == len(all_flat), 'session size mismatch'
-        n_v = max(1, int(len(all_aug) * 0.15))
-        g   = torch.Generator().manual_seed(42)
-        train_ds, _      = random_split(all_aug,  [len(all_aug)  - n_v, n_v], generator=g)
-        g   = torch.Generator().manual_seed(42)    # same seed → identical indices
-        _,       val_ds  = random_split(all_flat, [len(all_flat) - n_v, n_v], generator=g)
-        print(f'  train: {len(train_ds)}  val: {len(val_ds)}')
 
     pin = torch.cuda.is_available()
     train_loader = DataLoader(train_ds, batch_size=args.batch, shuffle=True,
@@ -169,6 +160,7 @@ def main():
     print(f'Model: {sum(p.numel() for p in model.parameters() if p.requires_grad):,} parameters\n')
 
     best_val   = float('inf')
+    best_tr    = float('inf')
     best_state = None
     t0         = time.monotonic()
 
@@ -178,8 +170,9 @@ def main():
         scheduler.step()
 
         marker = ''
-        if va < best_val:
+        if va < best_val and tr < best_tr:
             best_val   = va
+            best_tr    = tr
             best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
             marker     = '  ← best'
 
