@@ -24,7 +24,7 @@ import pygame
 
 JETSON_IP  = '192.168.4.2'
 LABEL_PORT = 5009
-STRAIGHT_SPEED = 0.30
+STRAIGHT_SPEED = 0.25
 STEER_SPEED    = 0.20
 
 _PKT = struct.Struct('<Bff')   # recording(uint8), left(float32), right(float32)
