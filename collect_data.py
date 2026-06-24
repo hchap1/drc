@@ -26,7 +26,8 @@ JETSON_IP    = '192.168.4.2'
 LABEL_PORT   = 5009
 SPEED        = 0.3        # starting speed (SPACE/LSHIFT adjust)
 STEER_MULT   = 1.5        # steering is this × speed
-RAMP_TIME    = 0.5        # seconds to go from 0 → full output
+RAMP_UP      = 0.3        # seconds: 0 → full (press)
+RAMP_DOWN    = 0.05       # seconds: full → 0 (release)
 
 _PKT = struct.Struct('<Bff')   # recording(uint8), left(float32), right(float32)
 
@@ -55,12 +56,14 @@ def _cmd_thread(ip, port, getter, stop):
         stop.wait(1.0)
 
 
-def _ramp(current, target, max_step):
-    """Move current toward target by at most max_step."""
+def _ramp(current, target, step_up, step_down):
+    """Move current toward target, using different rates for up vs down."""
     diff = target - current
-    if abs(diff) <= max_step:
-        return target
-    return current + max_step * (1 if diff > 0 else -1)
+    if diff > 0:
+        return current + min(diff, step_up)
+    elif diff < 0:
+        return current + max(diff, -step_down)
+    return current
 
 
 def main():
@@ -125,10 +128,12 @@ def main():
             target_l  = max(-max_out, min(max_out, target_l))
             target_r  = max(-max_out, min(max_out, target_r))
 
-            # smooth: ramp at (max_out / RAMP_TIME) per second
-            max_step  = (speed * STEER_MULT / RAMP_TIME) * (dt / 1000)
-            smooth_l  = _ramp(smooth_l, target_l, max_step)
-            smooth_r  = _ramp(smooth_r, target_r, max_step)
+            # smooth: asymmetric ramp — slow up, fast down
+            max_out    = speed * STEER_MULT
+            step_up    = (max_out / RAMP_UP)   * (dt / 1000)
+            step_down  = (max_out / RAMP_DOWN) * (dt / 1000)
+            smooth_l   = _ramp(smooth_l, target_l, step_up, step_down)
+            smooth_r   = _ramp(smooth_r, target_r, step_up, step_down)
 
             with _lock:
                 _state['recording'] = recording
