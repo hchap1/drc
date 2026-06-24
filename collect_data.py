@@ -24,8 +24,8 @@ import pygame
 
 JETSON_IP  = '192.168.4.2'
 LABEL_PORT = 5009
-BASE_SPEED = 0.225
-MAX_SPEED  = 0.30
+STRAIGHT_SPEED = 0.30
+STEER_SPEED    = 0.20
 
 _PKT = struct.Struct('<Bff')   # recording(uint8), left(float32), right(float32)
 
@@ -72,13 +72,11 @@ def main():
     big  = pygame.font.SysFont(None, 64)
     tick = pygame.time.Clock()
 
-    recording   = False
-    speed       = BASE_SPEED
-    motor_timer = 0
+    recording = False
 
     try:
         while True:
-            dt = tick.tick(60)
+            tick.tick(60)
 
             for ev in pygame.event.get():
                 if ev.type == pygame.QUIT:
@@ -93,17 +91,14 @@ def main():
             keys  = pygame.key.get_pressed()
             left  = right = 0.0
 
-            if keys[pygame.K_w]: left  += speed;       right += speed
-            if keys[pygame.K_s]: left  -= speed;       right -= speed
-            if keys[pygame.K_a]: left  -= speed * 2.5; right += speed * 2.5
-            if keys[pygame.K_d]: left  += speed * 2.5; right -= speed * 2.5
-
-            if keys[pygame.K_SPACE]:  speed += dt / 10000
-            if keys[pygame.K_LSHIFT]: speed -= dt / 10000
-            speed = max(0.05, min(MAX_SPEED, speed))
-
-            left  = max(-MAX_SPEED, min(MAX_SPEED, left))
-            right = max(-MAX_SPEED, min(MAX_SPEED, right))
+            if keys[pygame.K_a]:
+                left, right = -STEER_SPEED, STEER_SPEED
+            elif keys[pygame.K_d]:
+                left, right = STEER_SPEED, -STEER_SPEED
+            elif keys[pygame.K_w]:
+                left = right = STRAIGHT_SPEED
+            elif keys[pygame.K_s]:
+                left = right = -STRAIGHT_SPEED
 
             with _lock:
                 _state['recording'] = recording
@@ -113,12 +108,12 @@ def main():
             # ── display ──────────────────────────────────────────────────────
             sw, sh = screen.get_size()
             screen.fill((20, 20, 20))
-            screen.blit(font.render(f'L:{left:+.2f}  R:{right:+.2f}  spd:{speed:.2f}', True, (220, 220, 220)), (8, 8))
+            screen.blit(font.render(f'L:{left:+.2f}  R:{right:+.2f}', True, (220, 220, 220)), (8, 8))
 
             if recording:
                 screen.blit(big.render('● REC', True, (255, 40, 40)), (8, sh - 70))
             else:
-                screen.blit(font.render('R=record  SPACE=faster  SHIFT=slower  Q=quit', True, (130, 130, 130)), (8, sh - 30))
+                screen.blit(font.render('R=record  W/A/S/D=drive  Q=quit', True, (130, 130, 130)), (8, sh - 30))
 
             pygame.display.flip()
 
