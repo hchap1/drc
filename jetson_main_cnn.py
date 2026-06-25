@@ -103,6 +103,8 @@ def main():
                     help='motor output multiplier, e.g. 1.05 = 5%% faster (default 1.0)')
     ap.add_argument('straight_mult', nargs='?', type=float, default=1.0,
                     help='extra multiplier applied only when L/R powers are within 5%% of each other (default 1.0)')
+    ap.add_argument('--launch', type=float, default=0.0, metavar='SECS',
+                    help='blast both wheels at 0.7 for this many seconds on Enter before handing off to CNN (default 0)')
     args = ap.parse_args()
 
     model, device_str = _load_model(args)
@@ -136,6 +138,11 @@ def main():
 
     def _wait_for_enter():
         input('Press Enter to start driving...')
+        if args.launch > 0.0:
+            print(f'[launch] 0.7 power for {args.launch:.2f}s')
+            motors.send(0.7, 0.7)
+            time.sleep(args.launch)
+            print('[launch] done — handing off to CNN')
         armed.set()
         print('[armed] motors enabled')
 
