@@ -113,17 +113,15 @@ def main():
     debug_vid = video_server.serve(port=5007, jpeg_quality=80, stream_width=None)
     print(f'Debug feed on port 5007  ({IMG_W}×{IMG_H})')
 
-    # Wait for the camera pipeline to produce its first frame before prompting,
-    # so that pressing Enter starts driving immediately with no delay.
-    print('Waiting for camera...')
-    while True:
-        with _frame_lock:
-            if _latest_frame is not None:
-                break
-        time.sleep(0.01)
-    print('Camera ready.')
+    # Armed event: inference runs immediately; motors only engage on Enter.
+    armed = threading.Event()
 
-    input('Press Enter to start driving...')
+    def _wait_for_enter():
+        input('Press Enter to start driving...')
+        armed.set()
+        print('[armed] motors enabled')
+
+    threading.Thread(target=_wait_for_enter, daemon=True).start()
 
     frame_n = 0
     left    = 0.0
@@ -149,7 +147,8 @@ def main():
                 left  *= straight_mult
                 right *= straight_mult
 
-            motors.send(left, right)
+            if armed.is_set():
+                motors.send(left, right)
             frame_n += 1
 
             if frame_n % DEBUG_SKIP == 0:
