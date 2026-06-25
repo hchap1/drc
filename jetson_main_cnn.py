@@ -113,17 +113,16 @@ def main():
     debug_vid = video_server.serve(port=5007, jpeg_quality=80, stream_width=None)
     print(f'Debug feed on port 5007  ({IMG_W}×{IMG_H})')
 
-    # ── Wait for viewer then Enter ────────────────────────────────────────────
-    print('Waiting for view_camera_feed.py to connect...')
-    while not debug_vid._clients:
-        debug_vid._accept_new_clients()
+    # Wait for the camera pipeline to produce its first frame before prompting,
+    # so that pressing Enter starts driving immediately with no delay.
+    print('Waiting for camera...')
+    while True:
         with _frame_lock:
-            frame = _latest_frame
-        if frame is not None:
-            debug_vid.send(frame)
-        time.sleep(0.05)
+            if _latest_frame is not None:
+                break
+        time.sleep(0.01)
+    print('Camera ready.')
 
-    print(f'{len(debug_vid._clients)} viewer(s) connected.')
     input('Press Enter to start driving...')
 
     frame_n = 0
