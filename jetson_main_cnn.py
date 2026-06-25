@@ -21,7 +21,8 @@ import torch
 import motor_client
 import video_server
 from cnn_model import DrivingCNN, preprocess, IMG_W, IMG_H
-DEBUG_SKIP = 2    # stream every Nth frame on port 5007
+DEBUG_SKIP   = 2   # stream every Nth frame on port 5007
+FINISH_FRAMES = 4  # consecutive detections required to trigger stop
 
 SENSOR_W    = 1280
 SENSOR_H    = 720
@@ -59,6 +60,23 @@ def _capture_loop(cap):
         if ok:
             with _frame_lock:
                 _latest_frame = frame
+
+
+# ── Finish-line detector ──────────────────────────────────────────────────────
+# Uses the bottom half of the already-tiny 160×90 frame so it's cheap.
+# A solid tape line lights up most columns; scattered squares only a few.
+_GREEN_LO = np.array([40,  60,  60], dtype=np.uint8)
+_GREEN_HI = np.array([80, 255, 255], dtype=np.uint8)
+_MIN_COL_FILL  = 0.55   # fraction of width that must be green
+_MIN_ROW_STACK = 3      # green pixels stacked vertically in a column to count it
+
+def _finish_line_present(frame: np.ndarray) -> bool:
+    roi  = frame[frame.shape[0] // 2:]               # bottom half
+    hsv  = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+    mask = cv2.inRange(hsv, _GREEN_LO, _GREEN_HI)    # 0/255 per pixel
+    col_green = np.count_nonzero(mask, axis=0)        # green px per column
+    wide_cols = np.count_nonzero(col_green >= _MIN_ROW_STACK)
+    return wide_cols >= frame.shape[1] * _MIN_COL_FILL
 
 
 # ── Model loading ─────────────────────────────────────────────────────────────
@@ -123,11 +141,12 @@ def main():
 
     threading.Thread(target=_wait_for_enter, daemon=True).start()
 
-    frame_n = 0
-    left    = 0.0
-    right   = 0.0
-    t0      = time.monotonic()
-    t_log   = t0
+    frame_n      = 0
+    finish_count = 0
+    left         = 0.0
+    right        = 0.0
+    t0           = time.monotonic()
+    t_log        = t0
 
     try:
         while True:
@@ -136,6 +155,17 @@ def main():
 
             if frame is None:
                 continue
+
+            # Finish-line check — fast numpy path, no contours
+            if _finish_line_present(frame):
+                finish_count += 1
+                if finish_count >= FINISH_FRAMES:
+                    print('[finish] line detected — letting it roll across')
+                    motors.send(0.0, 0.0)
+                    time.sleep(1.5)   # coast across the line
+                    break
+            else:
+                finish_count = 0
 
             # Inference — frame is already IMG_W×IMG_H from GStreamer
             tensor = preprocess(frame).to(device)
