@@ -61,7 +61,7 @@ motors    = None
 debug_vid = None
 
 
-def _log(msg: str):
+def _log(msg):
     print(msg, flush=True)
     with _conn_lock:
         c = _active_conn
@@ -72,7 +72,7 @@ def _log(msg: str):
             pass
 
 
-def _send(msg: str):
+def _send(msg):
     with _conn_lock:
         c = _active_conn
     if c is not None:
@@ -117,7 +117,7 @@ _MIN_COL_FILL  = 0.55
 _MIN_ROW_STACK = 3
 
 
-def _finish_line_present(frame: np.ndarray) -> bool:
+def _finish_line_present(frame):
     roi       = frame[frame.shape[0] // 2:]
     hsv       = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
     mask      = cv2.inRange(hsv, _GREEN_LO, _GREEN_HI)
@@ -128,7 +128,7 @@ def _finish_line_present(frame: np.ndarray) -> bool:
 
 # ── Connection handler ────────────────────────────────────────────────────────
 
-def _handle_connection(conn: socket.socket):
+def _handle_connection(conn):
     global _speed_mult, _straight_mult, _launch_time
 
     with _conn_lock:
@@ -181,7 +181,7 @@ def _handle_connection(conn: socket.socket):
             pass
 
 
-def _server_loop(srv: socket.socket):
+def _server_loop(srv):
     while True:
         try:
             conn, _ = srv.accept()

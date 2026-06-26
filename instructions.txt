@@ -1,0 +1,120 @@
+====================================================================
+  DRC CNN BACKEND — USAGE INSTRUCTIONS
+====================================================================
+
+OVERVIEW
+--------
+Two programs work together:
+
+  cnn_backend.py  — persistent process that loads the model and camera
+                    once and keeps them hot. Runs the inference loop
+                    continuously. Motors only move when armed.
+
+  run.py          — lightweight control interface. Connect and disconnect
+                    as many times as you want. The backend keeps running
+                    between connections.
+
+Communication is over a Unix socket at /tmp/drc_cnn.sock.
+The backend survives SSH disconnections. run.py does not need to stay open.
+
+
+TYPICAL RACE DAY WORKFLOW
+--------------------------
+
+1. SSH into the Jetson and start the backend (first time only per boot):
+
+     python3 run.py start <MODEL_FOLDER>
+
+   This spawns cnn_backend.py in the background and streams its startup
+   telemetry (model loading, warm-up, camera open) to your terminal.
+   Once you see "backend ready", the robot is ready to drive.
+
+2. Press Enter to arm the motors and start driving.
+   run.py exits. The backend and motors keep running independently.
+
+3. The robot stops automatically when it crosses the green finish line.
+   Motors are disarmed but the backend stays alive — ready for another run.
+
+4. To run again (with the same or different speed settings):
+
+     python3 run.py start <MODEL_FOLDER> <SPEED_MULT> <STRAIGHT_MULT>
+
+   Since the backend is already running, this connects instantly, sends
+   the new config, and immediately shows "backend ready".
+   Press Enter to arm again.
+
+5. When you are done for the day:
+
+     python3 run.py quit
+
+   This shuts down cnn_backend.py completely, releasing the camera and
+   cleaning up the socket.
+
+
+COMMANDS
+--------
+
+  python3 run.py start <folder> [speed_mult] [straight_mult] [--launch SECS]
+
+      folder        — model folder containing model.pt (e.g. run8)
+      speed_mult    — motor output multiplier, e.g. 1.05 = 5% faster (default 1.0)
+      straight_mult — extra multiplier applied when L/R outputs are within 5%
+                      of each other (straight sections only) (default 1.0)
+      --launch SECS — blast both motors at full power for this many seconds
+                      the moment Enter is pressed, before handing off to the CNN.
+                      Useful for a race start boost. (default 0.0)
+
+  python3 run.py stop
+
+      Disarms the motors immediately. The backend keeps running.
+      Use this if you need to abort a run mid-track.
+
+  python3 run.py quit
+
+      Shuts down cnn_backend.py completely. Use this when you are
+      finished and want to release the camera.
+
+
+EXAMPLES
+--------
+
+  Basic run:
+    python3 run.py start run8
+
+  5% speed boost:
+    python3 run.py start run8 1.05
+
+  5% speed boost + 10% straight boost + 0.3s launch:
+    python3 run.py start run8 1.05 1.1 --launch 0.3
+
+  Abort a run:
+    python3 run.py stop
+
+  Shut down backend entirely:
+    python3 run.py quit
+
+
+DISCONNECTION BEHAVIOUR
+-----------------------
+- If your SSH session drops BEFORE you press Enter:
+  The backend is unaffected. Motors were never armed. SSH back in and
+  run `python3 run.py start <folder>` again — it will reconnect instantly.
+
+- If your SSH session drops AFTER you press Enter:
+  Motors keep running. The robot will complete its run and stop at the
+  finish line as normal. SSH back in and use `run.py stop` or `run.py quit`
+  if needed.
+
+- The backend never disarms motors due to a disconnection — only an
+  explicit `stop`, `quit`, or finish line detection will do that.
+
+
+DEBUG CAMERA FEED
+-----------------
+On your laptop, run:
+
+  python3 view_camera_feed.py
+
+This connects to port 5007 on the Jetson and shows exactly what the
+CNN sees (160x90, live). Available any time the backend is running.
+====================================================================

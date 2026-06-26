@@ -24,7 +24,7 @@ SOCK_PATH    = '/tmp/drc_cnn.sock'
 CONNECT_WAIT = 60
 
 
-def _connect(timeout: float) -> socket.socket | None:
+def _connect(timeout):
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
