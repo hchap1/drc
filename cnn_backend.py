@@ -12,8 +12,9 @@ Protocol (line-based over Unix socket):
   run.py → backend : START <speed_mult> <straight_mult> <launch_secs>
                      ARM
                      STOP
-  backend → run.py : LOG:<message>
-                     READY
+                     QUIT
+  backend → run.py : LOG:<message>   (any time, during init or running)
+                     READY            (sent once on connect, after init)
 """
 
 import argparse
@@ -129,12 +130,16 @@ def _finish_line_present(frame):
 # ── Connection handler ────────────────────────────────────────────────────────
 
 def _handle_connection(conn):
-    global _speed_mult, _straight_mult, _launch_time
+    global _active_conn, _speed_mult, _straight_mult, _launch_time
 
     with _conn_lock:
         _active_conn = conn
 
     try:
+        # Send READY as soon as init is done so launch knows it can exit
+        _initialized.wait()
+        _send('READY\n')
+
         for raw in conn.makefile('r'):
             cmd = raw.strip()
 
@@ -145,15 +150,14 @@ def _handle_connection(conn):
                     _straight_mult = float(parts[2]) if len(parts) > 2 else 1.0
                     _launch_time   = float(parts[3]) if len(parts) > 3 else 0.0
                 _armed.clear()
-                _log(f'[config] speed={_speed_mult:.3f}x  straight={_straight_mult:.3f}x  launch={_launch_time:.2f}s')
-                _initialized.wait()
-                _send('READY\n')
+                _log('[config] speed={:.3f}x  straight={:.3f}x  launch={:.2f}s'.format(
+                    _speed_mult, _straight_mult, _launch_time))
 
             elif cmd == 'ARM':
                 with _cfg_lock:
                     launch = _launch_time
                 if launch > 0.0:
-                    _log(f'[launch] 0.7 power for {launch:.2f}s')
+                    _log('[launch] 0.7 power for {:.2f}s'.format(launch))
                     motors.send(0.7, 0.7)
                     time.sleep(launch)
                     _log('[launch] done — handing off to CNN')

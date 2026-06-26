@@ -2,14 +2,10 @@
 run.py — control interface for cnn_backend.py.
 
 Usage:
-  python3 run.py start <folder> [speed_mult] [straight_mult] [--launch SECS]
+  python3 run.py launch <folder>
+  python3 run.py start  <speed_mult> <straight_mult> <launch_secs>
   python3 run.py stop
-
-`start` spawns cnn_backend.py if it isn't already running, then connects,
-streams telemetry to stdout, and waits for Enter before arming the motors.
-The backend (and motors) keep running after run.py exits.
-
-`stop` connects to a running backend and disarms the motors immediately.
+  python3 run.py quit
 """
 
 import argparse
@@ -17,7 +13,6 @@ import os
 import socket
 import subprocess
 import sys
-import threading
 import time
 
 SOCK_PATH    = '/tmp/drc_cnn.sock'
@@ -37,7 +32,15 @@ def _connect(timeout):
     return None
 
 
-def cmd_start(args):
+def _require_backend():
+    sock = _connect(timeout=2.0)
+    if sock is None:
+        print('[run] no backend running — use: python3 run.py launch <folder>')
+        sys.exit(1)
+    return sock
+
+
+def cmd_launch(args):
     sock = _connect(timeout=1.0)
 
     if sock is None:
@@ -50,48 +53,43 @@ def cmd_start(args):
             start_new_session=True,
             close_fds=True,
         )
-        print(f'[run] backend spawned ({args.folder}) — connecting...')
+        print('[run] backend spawned — waiting for init...')
         sock = _connect(timeout=CONNECT_WAIT)
         if sock is None:
-            print('[run] backend did not become available — did it crash on startup?')
+            print('[run] backend did not start in time — did it crash?')
             sys.exit(1)
     else:
-        print('[run] connected to running backend')
-
-    sock.sendall(
-        f'START {args.speed_mult} {args.straight_mult} {args.launch}\n'.encode()
-    )
-
-    def _relay():
-        try:
-            for raw in sock.makefile('r'):
-                line = raw.rstrip('\n')
-                if line == 'READY':
-                    print('[run] backend ready — press Enter to start driving...')
-                elif line.startswith('LOG:'):
-                    print(line[4:])
-        except OSError:
-            pass
-
-    threading.Thread(target=_relay, daemon=True).start()
-
-    input()
+        print('[run] backend already running')
 
     try:
-        sock.sendall(b'ARM\n')
+        for raw in sock.makefile('r'):
+            line = raw.rstrip('\n')
+            if line == 'READY':
+                print('[run] ready — use: python3 run.py start <speed> <straight> <launch>')
+                break
+            elif line.startswith('LOG:'):
+                print(line[4:])
     except OSError:
-        print('[run] failed to send ARM — backend may have crashed')
-        sys.exit(1)
+        pass
 
     sock.close()
-    print('[run] ARM sent — exiting (backend continues independently)')
+
+
+def cmd_start(args):
+    sock = _require_backend()
+    try:
+        msg = 'START {s} {st} {l}\nARM\n'.format(
+            s=args.speed_mult, st=args.straight_mult, l=args.launch)
+        sock.sendall(msg.encode())
+    except OSError:
+        print('[run] failed to send — backend may have crashed')
+        sys.exit(1)
+    sock.close()
+    print('[run] started')
 
 
 def cmd_stop(args):
-    sock = _connect(timeout=3.0)
-    if sock is None:
-        print(f'[run] no backend found at {SOCK_PATH}')
-        sys.exit(1)
+    sock = _require_backend()
     try:
         sock.sendall(b'STOP\n')
     except OSError:
@@ -102,34 +100,33 @@ def cmd_stop(args):
 
 
 def cmd_quit(args):
-    sock = _connect(timeout=3.0)
-    if sock is None:
-        print(f'[run] no backend found at {SOCK_PATH}')
-        sys.exit(1)
+    sock = _require_backend()
     try:
         sock.sendall(b'QUIT\n')
     except OSError:
         print('[run] failed to send QUIT')
         sys.exit(1)
     sock.close()
-    print('[run] backend shutdown sent')
+    print('[run] backend shut down')
 
 
 def main():
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest='command')
 
-    p = sub.add_parser('start', help='arm the robot (spawning backend if needed)')
-    p.add_argument('folder',        help='model folder containing model.pt')
+    p = sub.add_parser('launch', help='start the backend and wait for it to be ready')
+    p.add_argument('folder', help='model folder containing model.pt')
+
+    p = sub.add_parser('start', help='arm motors with given parameters (backend must be launched first)')
     p.add_argument('speed_mult',    nargs='?', type=float, default=1.0,
                    help='motor output multiplier (default 1.0)')
     p.add_argument('straight_mult', nargs='?', type=float, default=1.0,
                    help='extra multiplier for straight sections (default 1.0)')
-    p.add_argument('--launch', type=float, default=0.0, metavar='SECS',
-                   help='blast at 0.7 for this many seconds before handing off to CNN')
+    p.add_argument('launch',        nargs='?', type=float, default=0.0,
+                   help='seconds to blast at 0.7 before CNN takes over (default 0.0)')
 
-    sub.add_parser('stop', help='disarm motors on a running backend')
-    sub.add_parser('quit', help='shut down cnn_backend.py completely')
+    sub.add_parser('stop', help='disarm motors, keep backend running')
+    sub.add_parser('quit', help='shut down the backend completely')
 
     args = ap.parse_args()
 
@@ -137,7 +134,9 @@ def main():
         ap.print_help()
         sys.exit(1)
 
-    if args.command == 'start':
+    if args.command == 'launch':
+        cmd_launch(args)
+    elif args.command == 'start':
         cmd_start(args)
     elif args.command == 'stop':
         cmd_stop(args)
