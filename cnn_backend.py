@@ -66,12 +66,12 @@ _srv      = None
 
 def _ramp_launch(duration):
     global _launch_mult
-    ramp = min(0.3, duration)
+    ramp = min(0.5, duration)
     hold = duration - ramp
-    steps = 30
+    steps = 50
     for i in range(1, steps + 1):
         with _cfg_lock:
-            _launch_mult = 1.0 + 2.0 * (i / float(steps))   # 1.0 → 3.0
+            _launch_mult = 1.0 + (i / float(steps))   # 1.0 → 2.0
         time.sleep(ramp / steps)
     if hold > 0.0:
         time.sleep(hold)
@@ -194,7 +194,7 @@ def _handle_connection(conn):
                 with _cfg_lock:
                     launch = _launch_time
                 if launch > 0.0:
-                    _log('[launch] ramping CNN output 1x→3x over 0.3s for {:.2f}s total'.format(launch))
+                    _log('[launch] ramping CNN output 1x→2x over 0.5s for {:.2f}s total'.format(launch))
                     threading.Thread(target=_ramp_launch, args=(launch,), daemon=True).start()
 
             elif cmd == 'STOP':
