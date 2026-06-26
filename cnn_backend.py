@@ -46,10 +46,11 @@ FLIP_METHOD   = 2
 _conn_lock    = threading.Lock()
 _active_conn  = None          # current run.py connection, or None
 
-_cfg_lock     = threading.Lock()
-_speed_mult   = 1.0
+_cfg_lock      = threading.Lock()
+_speed_mult    = 1.0
 _straight_mult = 1.0
-_launch_time  = 0.0
+_launch_time   = 0.0
+_launch_mult   = 1.0   # boosted during launch ramp, returns to 1.0 after
 
 _armed        = threading.Event()   # clear = disarmed
 _initialized  = threading.Event()   # set once model + camera are ready
@@ -61,6 +62,22 @@ _running      = True
 motors    = None
 debug_vid = None
 _srv      = None
+
+
+def _ramp_launch(duration):
+    global _launch_mult
+    ramp = min(0.5, duration)
+    hold = duration - ramp
+    steps = 30
+    for i in range(1, steps + 1):
+        with _cfg_lock:
+            _launch_mult = 1.0 + (i / float(steps))   # 1.0 → 2.0
+        time.sleep(ramp / steps)
+    if hold > 0.0:
+        time.sleep(hold)
+    with _cfg_lock:
+        _launch_mult = 1.0
+    _log('[launch] boost off')
 
 
 def _shutdown(signum, frame):
@@ -172,15 +189,13 @@ def _handle_connection(conn):
                     _speed_mult, _straight_mult, _launch_time))
 
             elif cmd == 'ARM':
+                _armed.set()
+                _log('[armed] motors enabled')
                 with _cfg_lock:
                     launch = _launch_time
                 if launch > 0.0:
-                    _log('[launch] 0.7 power for {:.2f}s'.format(launch))
-                    motors.send(0.7, 0.7)
-                    time.sleep(launch)
-                    _log('[launch] done — handing off to CNN')
-                _armed.set()
-                _log('[armed] motors enabled')
+                    _log('[launch] ramping CNN output 1x→2x over 0.5s for {:.2f}s total'.format(launch))
+                    threading.Thread(target=_ramp_launch, args=(launch,), daemon=True).start()
 
             elif cmd == 'STOP':
                 _armed.clear()
@@ -305,7 +320,12 @@ def main():
                     right *= stm
 
                 if _armed.is_set():
-                    motors.send(left, right)
+                    with _cfg_lock:
+                        lm = _launch_mult
+                    motors.send(
+                        max(-1.0, min(1.0, left  * lm)),
+                        max(-1.0, min(1.0, right * lm)),
+                    )
                 frame_n += 1
 
                 if frame_n % DEBUG_SKIP == 0:
