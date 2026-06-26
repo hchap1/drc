@@ -60,6 +60,24 @@ _running      = True
 
 motors    = None
 debug_vid = None
+_srv      = None
+
+
+def _shutdown(signum, frame):
+    global _running
+    _running = False
+    if _srv:
+        _srv.close()
+    if motors:
+        motors.send(0.0, 0.0)
+        motors.close()
+    if debug_vid:
+        debug_vid.close()
+    try:
+        os.unlink(SOCK_PATH)
+    except FileNotFoundError:
+        pass
+    sys.exit(0)
 
 
 def _log(msg):
@@ -197,7 +215,7 @@ def _server_loop(srv):
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
-    global _running, motors, debug_vid
+    global _running, motors, debug_vid, _srv
 
     ap = argparse.ArgumentParser()
     ap.add_argument('folder', help='model folder containing model.pt')
@@ -208,30 +226,15 @@ def main():
     except FileNotFoundError:
         pass
 
-    srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    srv.bind(SOCK_PATH)
-    srv.listen(1)
-
-    def _shutdown(signum, frame):
-        global _running
-        _running = False
-        srv.close()
-        if motors:
-            motors.send(0.0, 0.0)
-            motors.close()
-        if debug_vid:
-            debug_vid.close()
-        try:
-            os.unlink(SOCK_PATH)
-        except FileNotFoundError:
-            pass
-        sys.exit(0)
+    _srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    _srv.bind(SOCK_PATH)
+    _srv.listen(1)
 
     signal.signal(signal.SIGTERM, _shutdown)
 
     # Server thread starts immediately so run.py can connect during init
     # and see model-loading telemetry
-    threading.Thread(target=_server_loop, args=(srv,), daemon=True).start()
+    threading.Thread(target=_server_loop, args=(_srv,), daemon=True).start()
 
     path = os.path.join(args.folder, 'model.pt')
     if not os.path.exists(path):
@@ -287,33 +290,38 @@ def main():
             else:
                 finish_count = 0
 
-            with _cfg_lock:
-                sm  = _speed_mult
-                stm = _straight_mult
+            try:
+                with _cfg_lock:
+                    sm  = _speed_mult
+                    stm = _straight_mult
 
-            tensor = preprocess(frame).to(device)
-            with torch.no_grad():
-                out = model(tensor)
-            left  = float(out[0, 0]) * sm
-            right = float(out[0, 1]) * sm
-            if abs(left - right) <= 0.08 * max(abs(left), abs(right)):
-                left  *= stm
-                right *= stm
+                tensor = preprocess(frame).to(device)
+                with torch.no_grad():
+                    out = model(tensor)
+                left  = float(out[0, 0]) * sm
+                right = float(out[0, 1]) * sm
+                if abs(left - right) <= 0.08 * max(abs(left), abs(right)):
+                    left  *= stm
+                    right *= stm
 
-            if _armed.is_set():
-                motors.send(left, right)
-            frame_n += 1
+                if _armed.is_set():
+                    motors.send(left, right)
+                frame_n += 1
 
-            if frame_n % DEBUG_SKIP == 0:
-                dbg = frame.copy()
-                cv2.putText(dbg, f'PT  L:{left:+.3f}  R:{right:+.3f}',
-                            (4, 14), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
-                debug_vid.send(dbg)
+                if frame_n % DEBUG_SKIP == 0:
+                    dbg = frame.copy()
+                    cv2.putText(dbg, 'PT  L:{:+.3f}  R:{:+.3f}'.format(left, right),
+                                (4, 14), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
+                    debug_vid.send(dbg)
 
-            now = time.monotonic()
-            if now - t_log >= 5.0:
-                _log(f'[fps] fps={frame_n/(now-t0):.1f}  L={left:+.3f}  R={right:+.3f}')
-                t_log = now
+                now = time.monotonic()
+                if now - t_log >= 5.0:
+                    _log('[fps] fps={:.1f}  L={:+.3f}  R={:+.3f}'.format(
+                        frame_n / (now - t0), left, right))
+                    t_log = now
+
+            except Exception as e:
+                _log('[error] inference error: {}'.format(e))
 
     finally:
         _running = False

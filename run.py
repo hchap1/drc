@@ -44,16 +44,20 @@ def cmd_launch(args):
     sock = _connect(timeout=1.0)
 
     if sock is None:
-        backend = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cnn_backend.py')
+        backend  = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cnn_backend.py')
+        log_path = '/tmp/drc_backend.log'
+        log_file = open(log_path, 'w')
         subprocess.Popen(
             [sys.executable, backend, args.folder],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=log_file,
+            stderr=log_file,
             stdin=subprocess.DEVNULL,
             start_new_session=True,
             close_fds=True,
         )
-        print('[run] backend spawned — waiting for init...')
+        log_file.close()
+        print('[run] backend spawned — log: {}'.format(log_path))
+        print('[run] waiting for init...')
         sock = _connect(timeout=CONNECT_WAIT)
         if sock is None:
             print('[run] backend did not start in time — did it crash?')
