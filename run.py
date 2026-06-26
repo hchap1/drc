@@ -117,7 +117,7 @@ def cmd_quit(args):
 
 def main():
     ap = argparse.ArgumentParser()
-    sub = ap.add_subparsers(dest='command', required=True)
+    sub = ap.add_subparsers(dest='command')
 
     p = sub.add_parser('start', help='arm the robot (spawning backend if needed)')
     p.add_argument('folder',        help='model folder containing model.pt')
@@ -132,6 +132,10 @@ def main():
     sub.add_parser('quit', help='shut down cnn_backend.py completely')
 
     args = ap.parse_args()
+
+    if not args.command:
+        ap.print_help()
+        sys.exit(1)
 
     if args.command == 'start':
         cmd_start(args)
