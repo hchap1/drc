@@ -35,7 +35,7 @@ from cnn_model import preprocess, IMG_W, IMG_H
 
 SOCK_PATH     = '/tmp/drc_cnn.sock'
 DEBUG_SKIP    = 2
-FINISH_FRAMES = 4
+FINISH_FRAMES = 2
 SENSOR_W      = 1280
 SENSOR_H      = 720
 FRAMERATE     = 30
@@ -71,7 +71,7 @@ def _ramp_launch(duration):
     steps = 30
     for i in range(1, steps + 1):
         with _cfg_lock:
-            _launch_mult = 1.0 + (i / float(steps))   # 1.0 → 2.0
+            _launch_mult = 1.0 + 2.0 * (i / float(steps))   # 1.0 → 3.0
         time.sleep(ramp / steps)
     if hold > 0.0:
         time.sleep(hold)
@@ -147,10 +147,10 @@ def _capture_loop(cap):
 
 # ── Finish-line detector ──────────────────────────────────────────────────────
 
-_GREEN_LO      = np.array([40,  60,  60], dtype=np.uint8)
-_GREEN_HI      = np.array([80, 255, 255], dtype=np.uint8)
-_MIN_COL_FILL  = 0.55
-_MIN_ROW_STACK = 3
+_GREEN_LO      = np.array([35,  40,  40], dtype=np.uint8)
+_GREEN_HI      = np.array([85, 255, 255], dtype=np.uint8)
+_MIN_COL_FILL  = 0.35
+_MIN_ROW_STACK = 2
 
 
 def _finish_line_present(frame):
